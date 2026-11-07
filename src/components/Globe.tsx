@@ -458,6 +458,77 @@ function Houses({ sim }: { sim: PlanetSim }) {
   );
 }
 
+// Bigger villages put up landmark buildings beside their houses: a hall, then a temple, then a watchtower.
+const LANDMARKS = [
+  { at: 5, body: [0.016, 0.011, 0.012], roof: [0.013, 0.008], wall: "#d9c7a8" }, // town hall
+  { at: 9, body: [0.012, 0.022, 0.012], roof: [0.011, 0.014], wall: "#f4efe6" }, // temple, gold roof
+  { at: 14, body: [0.007, 0.03, 0.007], roof: [0.008, 0.012], wall: "#a59a8c" }, // watchtower
+] as const;
+const MAX_LANDMARKS = 200;
+function Landmarks({ sim }: { sim: PlanetSim }) {
+  const bodies = useRef<(THREE.InstancedMesh | null)[]>([]);
+  const roofs = useRef<(THREE.InstancedMesh | null)[]>([]);
+  const roofGeo = useMemo(() => LANDMARKS.map((l) => {
+    const g = new THREE.ConeGeometry(l.roof[0], l.roof[1], 4);
+    g.rotateY(Math.PI / 4);
+    return g;
+  }), []);
+  const cols = useMemo(() => sim.nations.map((n) => new THREE.Color(n.color).multiplyScalar(0.8)), [sim]);
+  const tmp = useMemo(() => ({ m: new THREE.Matrix4(), c: new THREE.Vector3(), p: new THREE.Vector3(), n: new THREE.Vector3(), t1: new THREE.Vector3(), t2: new THREE.Vector3(), q: new THREE.Quaternion(), one: new THREE.Vector3(1, 1, 1) }), []);
+  useFrame(() => {
+    const { m, c, p, n, t1, t2, q, one } = tmp;
+    const counts = [0, 0, 0];
+    for (const v of sim.villages) {
+      surface(sim, v.face, c);
+      n.copy(c).normalize();
+      t1.set(0, 1, 0).cross(n);
+      if (t1.lengthSq() < 1e-6) t1.set(1, 0, 0);
+      t1.normalize();
+      t2.copy(n).cross(t1);
+      q.setFromUnitVectors(UP_Y, n);
+      LANDMARKS.forEach((l, j) => {
+        const body = bodies.current[j], roof = roofs.current[j];
+        if (!body || !roof || v.houses < l.at || counts[j] >= MAX_LANDMARKS) return;
+        // Just outside the houses' spiral, each landmark on its own side of the village.
+        const r = 0.012 * Math.sqrt(v.houses) + 0.01;
+        const ang = v.id + j * 2.1;
+        p.copy(c).addScaledVector(t1, Math.cos(ang) * r).addScaledVector(t2, Math.sin(ang) * r).addScaledVector(n, l.body[1] / 2 - 0.001);
+        m.compose(p, q, one);
+        body.setMatrixAt(counts[j], m);
+        p.addScaledVector(n, l.body[1] / 2 + l.roof[1] / 2);
+        m.compose(p, q, one);
+        roof.setMatrixAt(counts[j], m);
+        roof.setColorAt(counts[j], j === 1 ? SHRINE : (cols[v.nation] ?? WHITE));
+        counts[j]++;
+      });
+    }
+    LANDMARKS.forEach((_, j) => {
+      for (const x of [bodies.current[j], roofs.current[j]]) {
+        if (!x) continue;
+        x.count = counts[j];
+        x.instanceMatrix.needsUpdate = true;
+        if (x.instanceColor) x.instanceColor.needsUpdate = true;
+      }
+    });
+  });
+  return (
+    <>
+      {LANDMARKS.map((l, j) => (
+        <group key={j}>
+          <instancedMesh ref={(el) => { bodies.current[j] = el; }} args={[undefined, undefined, MAX_LANDMARKS]} frustumCulled={false}>
+            {j === 2 ? <cylinderGeometry args={[l.body[0] / 2, l.body[0] / 2, l.body[1], 8]} /> : <boxGeometry args={[l.body[0], l.body[1], l.body[2]]} />}
+            <meshStandardMaterial color={l.wall} roughness={0.8} />
+          </instancedMesh>
+          <instancedMesh ref={(el) => { roofs.current[j] = el; }} args={[roofGeo[j], undefined, MAX_LANDMARKS]} frustumCulled={false}>
+            <meshStandardMaterial color="#ffffff" flatShading roughness={0.7} />
+          </instancedMesh>
+        </group>
+      ))}
+    </>
+  );
+}
+const UP_Y = new THREE.Vector3(0, 1, 0);
+
 // Start with the camera looking at where the people are.
 function FaceStart({ sim }: { sim: PlanetSim }) {
   const camera = useThree((s) => s.camera);
@@ -745,6 +816,7 @@ export default function Globe({ sim, tool, speed, onPaint, onHover, focus }: { s
       <PlanetMesh sim={sim} tool={tool} onPaint={onPaint} onHover={onHover} />
       <People sim={sim} />
       <Houses sim={sim} />
+      <Landmarks sim={sim} />
       <Trees sim={sim} />
       <Ocean />
       <Clouds />
