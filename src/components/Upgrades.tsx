@@ -53,7 +53,25 @@ export default function Upgrades({
   const amount = Math.max(10, Math.round((VALUE[to] * 20) / VALUE[from]) * 2); // enough to get ~20 value
   const get = Math.floor((amount * VALUE[from] * 0.5) / VALUE[to]);
   return (
-    <div className="glass pointer-events-auto w-full max-w-3xl p-3">
+    <div className="glass pointer-events-auto w-full max-w-4xl p-3">
+      <div className="mb-3 rounded-lg bg-sky-400/10 p-2.5">
+        <div className="mb-2 flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold">Planet resources</p>
+            <p className="text-xs text-white/50">Spend your stockpile to shape civilisation</p>
+          </div>
+          <span className="text-xs text-sky-200/70">Live stockpile</span>
+        </div>
+        <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-6">
+          {KINDS.map((kind) => (
+            <div key={kind} className="rounded-md bg-black/15 px-1.5 py-1 text-center" title={`${kind} available`}>
+              <div className="text-sm leading-none">{RESOURCE_ICON[kind]}</div>
+              <div className="mt-1 text-sm font-semibold tabular-nums">{resources[kind].toLocaleString()}</div>
+              <div className="text-[10px] capitalize text-white/45">{kind}</div>
+            </div>
+          ))}
+        </div>
+      </div>
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-3">
         {UPGRADES.map((u) => {
           const level = levels[u.id];
@@ -69,7 +87,10 @@ export default function Upgrades({
                   {"●".repeat(level) + "○".repeat(MAX_LEVEL - level)}
                 </span>
               </div>
-              <p className="mt-1 text-xs text-white/55">{u.effect}</p>
+              <p className="mt-1 text-xs text-white/55">{u.effect} per level</p>
+              <p className={`mt-1 text-[10px] font-semibold uppercase tracking-wide ${level ? "text-emerald-300" : "text-white/35"}`}>
+                {level ? `Active · level ${level}` : "Not built"}
+              </p>
               <div className="mt-2 flex items-center gap-2">
                 {maxed ? (
                   <span className="text-xs text-white/40">Fully built</span>
