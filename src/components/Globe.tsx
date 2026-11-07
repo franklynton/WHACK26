@@ -42,9 +42,27 @@ const ONE_SHOT: Tool[] = ["spawn", "meteor"];
 function PlanetMesh({ sim, tool, onPaint, onHover }: { sim: PlanetSim; tool: Tool; onPaint: (power: GodPower, face: number) => void; onHover?: (face: number | null, x: number, y: number) => void }) {
   const geometry = useMemo(() => {
     const g = sim.geometry.clone();
-    g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(g.getAttribute("position").count * 3), 3));
+    const count = g.getAttribute("position").count;
+    g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(count * 3), 3));
+    // For curved borders (see SmoothBorders): the neighbours' colour and how much of each corner is "ours".
+    g.setAttribute("other", new THREE.BufferAttribute(new Float32Array(count * 3), 3));
+    g.setAttribute("share", new THREE.BufferAttribute(new Float32Array(count), 1));
+    const bary = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) bary[i * 3 + (i % 3)] = 1;
+    g.setAttribute("bary", new THREE.BufferAttribute(bary, 3));
     return g;
   }, [sim]);
+  // Which tiles meet at each corner (compressed: tiles of corner c are cornerTiles[start[c]..start[c+1])).
+  const corners = useMemo(() => {
+    const start = new Int32Array(sim.cornerCount + 1);
+    for (let i = 0; i < sim.n * 3; i++) start[sim.vertexId[i] + 1]++;
+    for (let c = 0; c < sim.cornerCount; c++) start[c + 1] += start[c];
+    const fill = start.slice(0, sim.cornerCount);
+    const tiles = new Int32Array(sim.n * 3);
+    for (let i = 0; i < sim.n * 3; i++) tiles[fill[sim.vertexId[i]]++] = Math.floor(i / 3);
+    return { start, tiles };
+  }, [sim]);
+  const material = useMemo(() => smoothBordersMaterial(), []);
   const base = sim.geometry.getAttribute("position");
   const shown = useRef(-1);
   const flicker = useRef(0);
@@ -61,13 +79,15 @@ function PlanetMesh({ sim, tool, onPaint, onHover }: { sim: PlanetSim; tool: Too
 
     const pos = geometry.getAttribute("position") as THREE.BufferAttribute;
     const col = geometry.getAttribute("color") as THREE.BufferAttribute;
-    // Corner height = highest land among the tiles that share it, so land has no cracks.
-    const corner = new Float32Array(sim.cornerCount).fill(-1);
+    // Corner height = average of the tiles that share it, so coasts slope smoothly into the sea (curved shorelines).
+    const corner = new Float32Array(sim.cornerCount);
+    const cornerN = new Float32Array(sim.cornerCount);
     for (let i = 0; i < pos.count; i++) {
-      const h = lift(sim.elevation[Math.floor(i / 3)]);
       const c = sim.vertexId[i];
-      if (h > corner[c]) corner[c] = h;
+      corner[c] += lift(sim.elevation[Math.floor(i / 3)]);
+      cornerN[c]++;
     }
+    for (let c = 0; c < sim.cornerCount; c++) corner[c] /= cornerN[c];
     const c = new THREE.Color();
     const v = new THREE.Vector3();
     const nationCols = sim.nations.map((n) => new THREE.Color(n.color));
@@ -97,12 +117,34 @@ function PlanetMesh({ sim, tool, onPaint, onHover }: { sim: PlanetSim; tool: Too
     // 2. Positions, colours, and smooth normals shared by every tile at a corner (smooth hills, crisp colours).
     const normal = new Float32Array(sim.cornerCount * 3);
     const a = new THREE.Vector3(), b = new THREE.Vector3(), d = new THREE.Vector3();
+    const other = geometry.getAttribute("other") as THREE.BufferAttribute;
+    const share = geometry.getAttribute("share") as THREE.BufferAttribute;
     for (let i = 0; i < pos.count; i++) {
       v.fromBufferAttribute(base, i).normalize().multiplyScalar(1 + corner[sim.vertexId[i]]);
       pos.setXYZ(i, v.x, v.y, v.z);
       const f = Math.floor(i / 3);
-      col.setXYZ(i, tile[f * 3], tile[f * 3 + 1], tile[f * 3 + 2]); // crisp: one colour per tile
+      const r = tile[f * 3], g = tile[f * 3 + 1], bl = tile[f * 3 + 2];
+      col.setXYZ(i, r, g, bl); // each tile keeps one crisp colour...
+      // ...but at each corner, note what fraction of the tiles there look the same, and the average colour of the rest.
+      const cid = sim.vertexId[i];
+      let same = 0, n = 0, or = 0, og = 0, ob = 0;
+      for (let j = corners.start[cid]; j < corners.start[cid + 1]; j++) {
+        const t = corners.tiles[j];
+        n++;
+        if (tile[t * 3] === r && tile[t * 3 + 1] === g && tile[t * 3 + 2] === bl) same++;
+        else {
+          or += tile[t * 3];
+          og += tile[t * 3 + 1];
+          ob += tile[t * 3 + 2];
+        }
+      }
+      const diff = n - same;
+      share.setX(i, same / n);
+      if (diff) other.setXYZ(i, or / diff, og / diff, ob / diff);
+      else other.setXYZ(i, r, g, bl);
     }
+    other.needsUpdate = true;
+    share.needsUpdate = true;
     for (let f = 0; f < sim.n; f++) {
       a.fromBufferAttribute(pos, f * 3);
       b.fromBufferAttribute(pos, f * 3 + 1).sub(a);
@@ -155,9 +197,32 @@ function PlanetMesh({ sim, tool, onPaint, onHover }: { sim: PlanetSim; tool: Too
       }}
       onPointerOut={() => onHover?.(null, 0, 0)}
     >
-      <meshStandardMaterial vertexColors roughness={0.9} />
+      <primitive object={material} attach="material" />
     </mesh>
   );
+}
+
+// Curved borders: instead of drawing every tile as a hard triangle, each fragment asks "is this point
+// mostly ours?" using a smooth field built from the corners (how many tiles there share our colour) plus
+// a bump at the tile's centre. Where the field drops below one half we show the neighbours' colour instead.
+// Along an edge both tiles see the same corner values, so the curves meet up seamlessly.
+function smoothBordersMaterial() {
+  const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 });
+  m.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", "#include <common>\nattribute vec3 other;\nattribute float share;\nattribute vec3 bary;\nvarying vec3 vOther;\nvarying float vShare;\nvarying vec3 vBary;")
+      .replace("#include <color_vertex>", "#include <color_vertex>\nvOther = other;\nvShare = share;\nvBary = bary;");
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <common>", "#include <common>\nvarying vec3 vOther;\nvarying float vShare;\nvarying vec3 vBary;")
+      .replace(
+        "#include <color_fragment>",
+        `float centre = 27.0 * vBary.x * vBary.y * vBary.z; // 1 in the middle of the tile, 0 on its edges
+        float field = vShare + centre * (1.0 - vShare) * 0.4; // lone tiles stay as small round dots
+        float aa = fwidth(field) * 0.75;
+        diffuseColor.rgb *= mix(vOther, vColor.rgb, smoothstep(0.5 - aa, 0.5 + aa, field));`,
+      );
+  };
+  return m;
 }
 
 // A soft glow of water just above the sea, so oceans read as water, not blue land.
