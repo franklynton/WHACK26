@@ -29,6 +29,7 @@ const WHITE = new THREE.Color("#ffffff");
 const WALL = new THREE.Color("#efe3cf");
 const SHRINE = new THREE.Color("#ffd447");
 const SCORCH = new THREE.Color("#3a2f2a");
+const PARCHED = new THREE.Color("#e0b25c"); // sun-baked land after a drought
 const FIRE = [new THREE.Color("#ff6a1a"), new THREE.Color("#ffc23a")];
 const LAND_HEIGHT = 0.07; // how far mountains stand out from the sea
 const SEA = 1.004; // radius of the water surface; land sits just above it, the sea floor below
@@ -102,6 +103,7 @@ function PlanetMesh({ sim, tool, onPaint, onHover }: { sim: PlanetSim; tool: Too
         const dep = DEPOSIT[sim.deposit[f] as D];
         if (dep && tileRand(f, 3) < 0.45) c.lerp(dep, 0.6);
         if (sim.scorch[f] > 0) c.lerp(SCORCH, Math.min(0.8, sim.scorch[f] / 20));
+        if (sim.parched[f] > 0) c.lerp(PARCHED, Math.min(0.75, sim.parched[f] / 25));
         // Nation territory: a light wash of its colour, stronger along the border.
         const o = sim.owner[f];
         if (o >= 0) {
@@ -956,6 +958,64 @@ function Catastrophes({ sim }: { sim: PlanetSim }) {
   );
 }
 
+// Drought: a hot glow over the baked land, with rings of heat haze rising and fading.
+const MAX_DROUGHTS = 3, HAZE = 3;
+function Droughts({ sim }: { sim: PlanetSim }) {
+  const glows = useRef<(THREE.Mesh | null)[]>([]);
+  const hazes = useRef<(THREE.Mesh | null)[]>([]);
+  const n = useMemo(() => new THREE.Vector3(), []);
+  const Z = useMemo(() => new THREE.Vector3(0, 0, 1), []);
+  useFrame(({ clock }) => {
+    const t = clock.elapsedTime;
+    for (let i = 0; i < MAX_DROUGHTS; i++) {
+      const d = sim.droughts[i];
+      const glow = glows.current[i];
+      if (glow) glow.visible = !!d;
+      for (let j = 0; j < HAZE; j++) {
+        const h = hazes.current[i * HAZE + j];
+        if (h) h.visible = !!d;
+      }
+      if (!d || !glow) continue;
+      n.set(...sim.c(d.face));
+      const age = sim.year - d.at;
+      const fade = Math.min(1, age / 1.5, (d.life - age) / 4);
+      // A disc of angular radius r sits at height cos(r) with radius sin(r).
+      glow.position.copy(n).multiplyScalar(Math.cos(d.r) * 1.075);
+      glow.quaternion.setFromUnitVectors(Z, n);
+      glow.scale.setScalar(Math.sin(d.r) * 1.075);
+      (glow.material as THREE.MeshBasicMaterial).opacity = (0.1 + 0.04 * Math.sin(t * 2)) * fade;
+      for (let j = 0; j < HAZE; j++) {
+        const h = hazes.current[i * HAZE + j];
+        if (!h) continue;
+        const k = (t * 0.35 + j / HAZE) % 1; // each ring rises, widens and fades, then starts again
+        const r = d.r * (0.35 + 0.5 * k);
+        h.position.copy(n).multiplyScalar(Math.cos(r) * (1.08 + 0.06 * k));
+        h.quaternion.setFromUnitVectors(Z, n);
+        h.scale.setScalar(Math.sin(r) * (1.08 + 0.06 * k));
+        (h.material as THREE.MeshBasicMaterial).opacity = 0.22 * Math.sin(Math.PI * k) * fade;
+      }
+    }
+  });
+  return (
+    <>
+      {Array.from({ length: MAX_DROUGHTS }, (_, i) => (
+        <group key={i}>
+          <mesh ref={(el) => { glows.current[i] = el; }} visible={false}>
+            <circleGeometry args={[1, 48]} />
+            <meshBasicMaterial color="#ffb347" transparent opacity={0} depthWrite={false} blending={THREE.AdditiveBlending} />
+          </mesh>
+          {Array.from({ length: HAZE }, (_, j) => (
+            <mesh key={j} ref={(el) => { hazes.current[i * HAZE + j] = el; }} visible={false}>
+              <ringGeometry args={[0.94, 1, 64]} />
+              <meshBasicMaterial color="#ffc46b" transparent opacity={0} side={THREE.DoubleSide} depthWrite={false} />
+            </mesh>
+          ))}
+        </group>
+      ))}
+    </>
+  );
+}
+
 // Runs the simulation in step with rendering, at `speed` years per second.
 function Clock({ sim, speed }: { sim: PlanetSim; speed: number }) {
   useFrame((_, dt) => {
@@ -986,6 +1046,7 @@ export default function Globe({ sim, tool, speed, onPaint, onHover, focus }: { s
       <Clouds />
       <Weather sim={sim} />
       <Catastrophes sim={sim} />
+      <Droughts sim={sim} />
       <Atmosphere />
       <OrbitControls
         enablePan={false}

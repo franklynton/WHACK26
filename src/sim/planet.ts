@@ -99,6 +99,8 @@ const FATE_ICONS: Record<GodPower, string> = {
 };
 // A tsunami ring spreading from `face`; a meteor falling towards `face`; an erupting volcano at `face`.
 export type Wave = { id: number; face: number; at: number; r: number };
+// A drought's heat haze over `face`, for the globe to draw while it lasts.
+export type Drought = { id: number; face: number; at: number; r: number; life: number };
 export type Meteor = { id: number; face: number; at: number; radius: number; fall: number; natural: boolean };
 // Volcanoes stay on the map. Most of the time they sleep; `active` while erupting, then dormant until `wakeAt`.
 export type Volcano = { id: number; face: number; active: boolean; at: number; life: number; nextBurst: number; wakeAt: number };
@@ -183,6 +185,7 @@ export class PlanetSim {
   food: Float32Array; // 0..1
   fire: Float32Array; // seconds left burning
   scorch: Float32Array; // seconds left looking burnt
+  parched: Float32Array; // seconds left looking sun-baked after a drought
   farm: Uint8Array; // 1 = farmland around a village
   terrain: Uint8Array; // derived, see classify()
   deposit: Uint8Array; // D.None, D.Metal, D.Gold or D.Herbs
@@ -260,6 +263,7 @@ export class PlanetSim {
     this.food = new Float32Array(this.n);
     this.fire = new Float32Array(this.n);
     this.scorch = new Float32Array(this.n);
+    this.parched = new Float32Array(this.n);
     this.farm = new Uint8Array(this.n);
     this.terrain = new Uint8Array(this.n);
     this.deposit = new Uint8Array(this.n);
@@ -394,6 +398,7 @@ export class PlanetSim {
         bless(0.3);
         break;
       case "drought":
+        this.parch(centre, radius);
         for (const [f, w] of area) {
           this.moisture[f] = Math.max(0, this.moisture[f] - 0.08 * (0.5 + w));
           this.food[f] *= 0.6;
@@ -626,6 +631,14 @@ export class PlanetSim {
   }
 
   private stepFood(dt: number) {
+    // Droughts fade: the baked look eases off a little at a time (redrawn every couple of seconds).
+    this.droughts = this.droughts.filter((d) => this.year - d.at < d.life);
+    let fading = false;
+    for (let f = 0; f < this.n; f++) if (this.parched[f] > 0) {
+      this.parched[f] = Math.max(0, this.parched[f] - dt);
+      fading = true;
+    }
+    if (fading && Math.floor(this.year / 2) !== Math.floor((this.year - dt) / 2)) this.version++;
     for (let f = 0; f < this.n; f++) {
       if (this.scorch[f] > 0) {
         this.scorch[f] = Math.max(0, this.scorch[f] - dt);
@@ -1311,6 +1324,14 @@ export class PlanetSim {
   alert: Alert | null = null;
 
   // Pop-ups: big news always shows; routine news (towns, eras, newcomers) only if nothing has popped up for a while.
+  // Bake the land around `face` a dusty gold for a while, with heat haze above it.
+  droughts: Drought[] = [];
+  private parch(face: number, radius: number) {
+    for (const [f, w] of this.tilesNear(face, radius)) if (!isWater(this.terrain[f] as T)) this.parched[f] = Math.max(this.parched[f], 30 * (0.4 + 0.6 * w));
+    if (!this.droughts.some((d) => d.face === face)) this.droughts.push({ id: this.nextId++, face, at: this.year, r: radius, life: 25 });
+    this.version++;
+  }
+
   private announce(icon: string, title: string, text: string, face: number, minor = false) {
     if (minor && this.alert && this.year - this.alert.at < MINOR_ALERT_GAP) return;
     this.alert = { icon, title, text, at: this.year, face };
@@ -1557,6 +1578,7 @@ export class PlanetSim {
       for (let k = 0; k < 3; k++) this.ignite(this.neighbours[target * 3 + k]);
     } else if (roll < 0.66) {
       kind = "drought";
+      this.parch(target, 0.2);
       for (const [f] of this.tilesNear(target, 0.2)) {
         this.moisture[f] = Math.max(0, this.moisture[f] - 0.15);
         this.food[f] *= 0.4;
