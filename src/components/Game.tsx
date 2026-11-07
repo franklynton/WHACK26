@@ -64,6 +64,7 @@ export default function Game({ playerName }: { playerName: string }) {
   const [sel, setSel] = useState(0); // the nation the god is looking at and talking to
   const [busy, setBusy] = useState<"" | "narrating" | "thinking">("");
   const [draft, setDraft] = useState("");
+  const [focus, setFocus] = useState<{ face: number; key: number } | null>(null); // where the camera flies to
   const [hover, setHover] = useState<{ id: number; x: number; y: number } | null>(null); // nation under the mouse
 
   // Refs so timers always see the latest state without re-subscribing.
@@ -241,7 +242,7 @@ export default function Game({ playerName }: { playerName: string }) {
   return (
     <main className="relative h-dvh w-full overflow-hidden select-none">
       <div className="absolute inset-0">
-        <Globe sim={sim} tool="hand" speed={speed} onPaint={() => {}} onHover={hoverAt} />
+        <Globe sim={sim} tool="hand" speed={speed} onPaint={() => {}} onHover={hoverAt} focus={focus} />
       </div>
 
       {/* The planet and its nations */}
@@ -270,7 +271,11 @@ export default function Game({ playerName }: { playerName: string }) {
             {hud.nations.map((n) => (
               <li key={n.id}>
                 <button
-                  onClick={() => setSel(n.id)}
+                  onClick={() => {
+                    setSel(n.id);
+                    const face = sim.nationHome(n.id);
+                    if (face != null) setFocus({ face, key: Date.now() });
+                  }}
                   className={`w-full rounded-lg px-2 py-1.5 text-left text-sm transition ${sel === n.id ? "bg-white/15" : "hover:bg-white/5"} ${n.alive ? "" : "opacity-40"}`}
                 >
                   <div className="flex items-center gap-2">
