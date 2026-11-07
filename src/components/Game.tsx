@@ -168,14 +168,22 @@ export default function Game({
     if (!upgradesOpen) return;
     const closeOnOutsideClick = (event: PointerEvent) => {
       const target = event.target as Node;
-      if (!resourcesPanelRef.current?.contains(target) && !upgradesMenuRef.current?.contains(target)) {
+      if (
+        !resourcesPanelRef.current?.contains(target) &&
+        !upgradesMenuRef.current?.contains(target)
+      ) {
         setUpgradesOpen(false);
       }
     };
     document.addEventListener("pointerdown", closeOnOutsideClick);
-    return () => document.removeEventListener("pointerdown", closeOnOutsideClick);
+    return () =>
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
   }, [upgradesOpen]);
-  const [link, setLink] = useState<GalaxyStatus>({ enabled: null, galaxy: null, members: 0 }); // the galaxy connection, for the HUD
+  const [link, setLink] = useState<GalaxyStatus>({
+    enabled: null,
+    galaxy: null,
+    members: 0,
+  }); // the galaxy connection, for the HUD
   useEffect(() => {
     const esc = (e: KeyboardEvent) => e.key === "Escape" && setMiracle(null);
     window.addEventListener("keydown", esc);
@@ -347,11 +355,28 @@ export default function Game({
     const answer = answerDue.current;
     const genesis = answer == null ? genesisDue.current.shift() : undefined;
     const gap = sim.demo ? DEMO_GAPS : 1;
-    const next = answer == null && genesis == null && Date.now() - lastNews.current > NEWS_GAP_MS * gap ? queue.current.shift() : undefined;
+    const next =
+      answer == null &&
+      genesis == null &&
+      Date.now() - lastNews.current > NEWS_GAP_MS * gap
+        ? queue.current.shift()
+        : undefined;
     let thinker: number | null = answer;
-    if (thinker == null && genesis == null && !next && Date.now() - lastAnyThought.current > THINK_GAP_MS * gap) {
-      const ready = sim.nations.filter((n) => n.alive && civsRef.current[n.id] && Date.now() - lastThought.current[n.id] > THINK_EVERY_MS * gap);
-      ready.sort((a, b) => lastThought.current[a.id] - lastThought.current[b.id]);
+    if (
+      thinker == null &&
+      genesis == null &&
+      !next &&
+      Date.now() - lastAnyThought.current > THINK_GAP_MS * gap
+    ) {
+      const ready = sim.nations.filter(
+        (n) =>
+          n.alive &&
+          civsRef.current[n.id] &&
+          Date.now() - lastThought.current[n.id] > THINK_EVERY_MS * gap,
+      );
+      ready.sort(
+        (a, b) => lastThought.current[a.id] - lastThought.current[b.id],
+      );
       thinker = ready[0]?.id ?? null;
     }
     if (genesis == null && !next && thinker == null) return;
@@ -366,7 +391,8 @@ export default function Game({
         );
         setCiv(genesis, res.civ);
         addEntry({ ...res.entry, nation: genesis });
-        lastThought.current[genesis] = Date.now() - THINK_EVERY_MS * gap + 15_000 * gap; // first words soon after waking
+        lastThought.current[genesis] =
+          Date.now() - THINK_EVERY_MS * gap + 15_000 * gap; // first words soon after waking
       } else if (next) {
         setBusy("narrating");
         lastNews.current = Date.now();
@@ -771,17 +797,37 @@ export default function Game({
           <button
             onClick={() => setGalaxy("join")}
             className={`rounded-lg px-2.5 py-1 text-sm transition ${hud.god.spacefaring ? "bg-indigo-400/25 font-semibold hover:bg-indigo-400/40" : "bg-white/5 hover:bg-white/10"}`}
-            title={hud.god.spacefaring ? "Trade with or invade the planets in your galaxy" : `Join or leave a galaxy. Trading and invading unlock at the Space Age (your nation is in the ${ERAS[hud.nations[0]?.era ?? 0]})`}
+            title={
+              hud.god.spacefaring
+                ? "Trade with or invade the planets in your galaxy"
+                : `Join or leave a galaxy. Trading and invading unlock at the Space Age (your nation is in the ${ERAS[hud.nations[0]?.era ?? 0]})`
+            }
           >
             🌌 Galaxy
           </button>
           {/* Connection pill: green with how full your galaxy is, "solo" when you're in none, grey when offline */}
           <span
             className={`flex shrink-0 items-center gap-1 self-center whitespace-nowrap rounded-full px-1.5 py-0.5 text-[11px] tabular-nums ${link.enabled && link.members ? "bg-emerald-400/15 text-emerald-200" : "bg-white/5 text-white/40"}`}
-            title={!link.enabled ? "Galaxy offline" : link.galaxy ? `In galaxy ${link.galaxy}: ${link.members}/5 gods` : link.members ? `${link.members} gods online` : "Not in a galaxy"}
+            title={
+              !link.enabled
+                ? "Galaxy offline"
+                : link.galaxy
+                  ? `In galaxy ${link.galaxy}: ${link.members}/5 gods`
+                  : link.members
+                    ? `${link.members} gods online`
+                    : "Not in a galaxy"
+            }
           >
-            <span className={`h-1.5 w-1.5 rounded-full ${link.enabled ? (link.members ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]" : "bg-white/50") : "bg-white/30"}`} />
-            {!link.enabled ? "off" : link.galaxy ? `${link.members}/5` : link.members ? link.members : "solo"}
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${link.enabled ? (link.members ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]" : "bg-white/50") : "bg-white/30"}`}
+            />
+            {!link.enabled
+              ? "off"
+              : link.galaxy
+                ? `${link.members}/5`
+                : link.members
+                  ? link.members
+                  : "solo"}
           </span>
           <button
             onClick={() => setMuted((m) => !m)}
@@ -801,12 +847,12 @@ export default function Game({
         )}
       </aside>
 
-      <div ref={resourcesPanelRef} className="glass absolute left-[17.5rem] top-4 z-20 w-72 p-3">
+      <div
+        ref={resourcesPanelRef}
+        className="glass absolute left-[17.5rem] top-4 z-20 w-72 p-3"
+      >
         <div className="mb-2 flex items-center justify-between">
           <p className="label">Resources</p>
-          <span className="text-[10px] text-white/40">
-            spend to improve your world
-          </span>
         </div>
         <div className="grid grid-cols-3 gap-2 text-center">
           <Stock
@@ -852,7 +898,7 @@ export default function Game({
         </div>
         <button
           onClick={() => setUpgradesOpen((open) => !open)}
-          className={`mt-3 flex w-full items-center justify-between border-t border-white/10 pt-2 text-left text-xs font-semibold transition hover:text-white ${upgradesOpen ? "text-amber-100" : "text-sky-200/90"} ${availableUpgrades ? "upgrade-ready" : ""}`}
+          className={`mt-3 flex w-full items-center border-t border-white/10 pt-2 text-left text-xs font-semibold transition hover:text-white ${upgradesOpen ? "text-amber-100" : "text-sky-200/90"}`}
           aria-expanded={upgradesOpen}
           title="Spend resources on permanent upgrades"
         >
@@ -865,13 +911,10 @@ export default function Game({
             <span>Upgrades</span>
             {availableUpgrades > 0 && (
               <span
-                className="h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_8px_rgba(110,231,183,0.9)]"
+                className="upgrade-available-dot h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_8px_rgba(110,231,183,0.9)]"
                 aria-label={`${availableUpgrades} upgrades available`}
               />
             )}
-          </span>
-          <span className="text-[10px] uppercase tracking-wider text-white/40">
-            {upgradesOpen ? "Hide" : "View"}
           </span>
         </button>
       </div>
@@ -887,7 +930,7 @@ export default function Game({
 
       {/* Pop-up: what is happening on the planet right now (disasters, weather, fate) */}
       {hud.alert && hud.year - hud.alert.at < 7 && (
-        <div className="pointer-events-none absolute top-4 left-[17.5rem] right-[19.5rem] flex justify-center">
+        <div className="pointer-events-none absolute top-4 left-[17.5rem] right-[19.5rem] z-40 flex justify-center">
           <div
             key={hud.alert.at}
             className="glass alert-pop pointer-events-auto flex max-w-lg items-center gap-3 px-5 py-3"
@@ -1169,7 +1212,12 @@ export default function Game({
               >
                 Keep watching
               </button>
-              <button onClick={() => (onNewPlanet ? onNewPlanet() : location.reload())} className="rounded-lg bg-sky-400/30 px-4 py-2 text-sm font-semibold hover:bg-sky-400/40">
+              <button
+                onClick={() =>
+                  onNewPlanet ? onNewPlanet() : location.reload()
+                }
+                className="rounded-lg bg-sky-400/30 px-4 py-2 text-sm font-semibold hover:bg-sky-400/40"
+              >
                 New planet
               </button>
             </div>
