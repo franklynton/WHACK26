@@ -5,7 +5,7 @@
 // (src/sim/planet.ts) to the LLM routes (/api/narrate, /api/mind).
 import { useCallback, useEffect, useRef, useState } from "react";
 import Globe from "./Globe";
-import Galaxy from "./Galaxy";
+import Galaxy, { type GalaxyStatus } from "./Galaxy";
 import LeaderDialog from "./LeaderDialog";
 import Portrait, { type Mood } from "./Portrait";
 import { ERAS, RACE, type RaceId } from "@/sim/races";
@@ -95,6 +95,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
   const [miracle, setMiracle] = useState<MiracleId | null>(null); // picked from the bar; click the land to cast
   const [seenOutcome, setSeenOutcome] = useState(false);
   const [galaxy, setGalaxy] = useState(false);
+  const [link, setLink] = useState<GalaxyStatus>({ enabled: null, online: 0, galaxy: "PUBLIC" }); // the galaxy connection, for the HUD
   useEffect(() => {
     const esc = (e: KeyboardEvent) => e.key === "Escape" && setMiracle(null);
     window.addEventListener("keydown", esc);
@@ -508,7 +509,13 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
             title={hud.god.spacefaring ? "Travel to other players' planets" : `Locked: your nation must reach the Space Age (now in the ${ERAS[hud.nations[0]?.era ?? 0]})`}
           >
             {hud.god.spacefaring ? "🌌 Galaxy" : "🔒 Galaxy"}
+            {link.enabled && <span className="ml-1.5 text-xs font-normal text-white/60">· {link.online} online</span>}
           </button>
+          {/* Connection light: green when the galaxy is reachable, grey when it's offline */}
+          <span
+            className={`h-2 w-2 self-center rounded-full ${link.enabled ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]" : "bg-white/20"}`}
+            title={link.enabled ? `Connected to ${link.galaxy === "PUBLIC" ? "the open galaxy" : `galaxy ${link.galaxy}`}: ${link.online} other ${link.online === 1 ? "god" : "gods"} online` : "Galaxy offline"}
+          />
           <button
             onClick={() => setMuted((m) => !m)}
             className="rounded-lg bg-white/5 px-2.5 py-1 text-sm transition hover:bg-white/10"
@@ -705,7 +712,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
         </div>
       )}
       {/* The galaxy (multiplayer): always syncing, opened by the Galaxy button once your nation reaches the Space Age */}
-      <Galaxy sim={sim} ownerName={playerName} planetName={planetName} open={galaxy && hud.god.spacefaring} onClose={() => setGalaxy(false)} />
+      <Galaxy sim={sim} ownerName={playerName} planetName={planetName} demo={demo} open={galaxy && hud.god.spacefaring} onClose={() => setGalaxy(false)} onStatus={setLink} />
     </main>
   );
 }

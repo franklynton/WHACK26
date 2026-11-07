@@ -2245,6 +2245,19 @@ export class PlanetSim {
     if (amount > 0 && home != null) this.announce("🛸", "A gift from the stars", `${other} sent ${amount} ${r}.`, home);
   }
 
+  // Gold carried home by our fleet after a won invasion.
+  galaxyLoot(amount: number, other: string) {
+    this.resources.gold += amount;
+    const home = this.nationHome(0);
+    if (home != null) this.announce("⚔️", "Victory among the stars", `Your fleet raided ${other} and brought home ${amount} gold.`, home);
+  }
+
+  // Galaxy news with no effect on the sim (a god joins, a fleet is repelled).
+  galaxyNews(icon: string, title: string, text: string) {
+    const home = this.nationHome(0);
+    if (home != null) this.announce(icon, title, text, home, true);
+  }
+
   // Another god's fleet raided us: some people die near the home village.
   invadedFromSpace(attacker: string, lost: number) {
     let left = lost;

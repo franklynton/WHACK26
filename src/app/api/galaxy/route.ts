@@ -15,6 +15,18 @@ function galaxyError(error: { code?: string; message?: string }, action: string)
   return NextResponse.json({ error: error.message || "Galaxy database action failed" }, { status: 400 });
 }
 
+// A galaxy code: upper-case letters and digits, up to 12. Anything else is the open galaxy.
+function cleanGalaxy(x: unknown) {
+  const g = String(x ?? "").toUpperCase();
+  return /^[A-Z0-9]{1,12}$/.test(g) ? g : "PUBLIC";
+}
+
+// True when Postgres says a function or column doesn't exist yet: migration 003 hasn't been run,
+// so we fall back to the open galaxy that 001 and 002 support.
+function notMigrated(error: { code?: string; message?: string } | null) {
+  return !!error && (error.code === "PGRST202" || error.code === "42703" || error.code === "42883" || /does not exist|Could not find/.test(error.message ?? ""));
+}
+
 // Columns other players may see (never owner_token, which proves who owns a planet).
 const PUBLIC_COLUMNS = "world_id, owner_name, planet_name, planet_type, population, villages, output, military, resources, updated_at";
 const ONLINE_MS = 2 * 60 * 1000; // planets that synced in the last two minutes are online
@@ -28,12 +40,20 @@ export async function GET(req: Request) {
   const params = new URL(req.url).searchParams;
   const worldId = /^[0-9a-f-]{36}$/i.test(params.get("worldId") ?? "") ? params.get("worldId")! : ""; // a UUID, as it goes into a filter
   const since = params.get("since");
-  const { data, error } = await supabase
+  const galaxy = cleanGalaxy(params.get("galaxy"));
+  const onlineSince = new Date(Date.now() - ONLINE_MS).toISOString();
+  let codes = true; // whether galaxy codes work (migration 003 has been run)
+  let { data, error } = await supabase
     .from("planets")
     .select(PUBLIC_COLUMNS)
-    .gte("updated_at", new Date(Date.now() - ONLINE_MS).toISOString())
+    .eq("galaxy", galaxy)
+    .gte("updated_at", onlineSince)
     .order("updated_at", { ascending: false })
     .limit(50);
+  if (notMigrated(error)) {
+    codes = false;
+    ({ data, error } = await supabase.from("planets").select(PUBLIC_COLUMNS).gte("updated_at", onlineSince).order("updated_at", { ascending: false }).limit(50));
+  }
   if (error?.code === "PGRST205" || error?.message?.includes("public.planets")) {
     return NextResponse.json({ error: "Galaxy migration not applied: public.planets is missing", enabled: false }, { status: 503 });
   }
@@ -56,7 +76,7 @@ export async function GET(req: Request) {
     actions = rows ?? [];
     for (const a of actions as { id: number }[]) lastActionId = Math.max(lastActionId, a.id);
   }
-  return NextResponse.json({ planets, actions, lastActionId, enabled: true });
+  return NextResponse.json({ planets, actions, lastActionId, enabled: true, galaxy: codes ? galaxy : "PUBLIC", codes });
 }
 
 export async function POST(req: Request) {
@@ -82,7 +102,7 @@ export async function POST(req: Request) {
     if (missing.length) {
       return NextResponse.json({ error: `Missing sync fields: ${missing.join(", ")}` }, { status: 400 });
     }
-    const { data, error } = await supabase.rpc("sync_planet", {
+    const args = {
       p_world_id: body.worldId,
       p_owner_token: body.ownerToken,
       p_owner_name: body.ownerName,
@@ -95,7 +115,9 @@ export async function POST(req: Request) {
       p_resources: body.resources,
       p_position_x: body.positionX ?? 0.5,
       p_position_y: body.positionY ?? 0.5,
-    });
+    };
+    let { data, error } = await supabase.rpc("sync_planet", { ...args, p_galaxy: cleanGalaxy(body.galaxy) });
+    if (notMigrated(error)) ({ data, error } = await supabase.rpc("sync_planet", args)); // before migration 003
     if (error) return galaxyError(error, "sync_planet");
     return NextResponse.json({ planet: data });
   }
@@ -113,7 +135,8 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Amount must be an integer between 1 and 10000" }, { status: 400 });
       }
     }
-    const rpc = action === "trade" ? "trade_planet" : "invade_planet";
+    // The galaxy_* versions (migration 003) also check both planets share a galaxy code.
+    let rpc = action === "trade" ? "galaxy_trade" : "galaxy_invade";
     const params = action === "trade"
       ? {
           p_source_world_id: body.worldId,
@@ -127,7 +150,11 @@ export async function POST(req: Request) {
           p_owner_token: body.ownerToken,
           p_target_world_id: body.targetWorldId,
         };
-    const { data, error } = await supabase.rpc(rpc, params);
+    let { data, error } = await supabase.rpc(rpc, params);
+    if (notMigrated(error)) {
+      rpc = action === "trade" ? "trade_planet" : "invade_planet";
+      ({ data, error } = await supabase.rpc(rpc, params));
+    }
     if (error) return galaxyError(error, rpc);
     return NextResponse.json({ message: data });
   }

@@ -5,6 +5,7 @@ import Portrait from "./Portrait";
 import RaceStats from "./RaceStats";
 import { RACES, type RaceId } from "@/sim/races";
 import { PLANET_TYPES } from "@/sim/planet";
+import { PUBLIC, getGalaxy, setGalaxy } from "@/lib/galaxyCode";
 
 const STEPS = [
   { icon: "🌍", title: "Get a planet", text: "Every planet is different. Some are rich in wood, others in metal, gold or rare medicinal herbs." },
@@ -30,6 +31,7 @@ export default function Landing({ onStart }: { onStart: (playerName: string, pla
   const [race, setRace] = useState<RaceId>("human");
   const [world, setWorld] = useState<number | undefined>(undefined); // undefined = random
   const [demo, setDemo] = useState(false); // a speedrun of the real game, for presentations
+  const [code, setCode] = useState(() => (getGalaxy() === PUBLIC ? "" : getGalaxy())); // galaxy code; empty is the open galaxy
 
   const start = (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,6 +41,7 @@ export default function Landing({ onStart }: { onStart: (playerName: string, pla
       localStorage.setItem(NAME_KEY, n);
       localStorage.setItem(PLANET_KEY, pl);
     } catch {}
+    setGalaxy(code || PUBLIC);
     onStart(n, pl, race, world, demo);
   };
 
@@ -126,6 +129,17 @@ export default function Landing({ onStart }: { onStart: (playerName: string, pla
             ))}
           </div>
           {demo && <p className="text-xs text-white/55">For presentations. The same game at triple speed, with faster eras and a button to skip to space. It saves separately, so your real planet is untouched.</p>}
+          <label htmlFor="galaxy" className="label mt-1">
+            Galaxy code <span className="normal-case text-white/40">(optional)</span>
+          </label>
+          <input
+            id="galaxy"
+            value={code}
+            onChange={(e) => setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12))}
+            placeholder="Leave empty for the open galaxy"
+            className="rounded-lg bg-white/10 px-4 py-2.5 font-mono uppercase outline-none placeholder:font-sans placeholder:normal-case placeholder:text-white/30 focus:bg-white/15"
+          />
+          <p className="text-xs text-white/40">Gods with the same code share a galaxy, so you can play with friends.</p>
           {world != null && (
             <p className="text-xs text-white/55">
               {PLANET_TYPES[world].blurb}. Prone to {PLANET_TYPES[world].hazard}s. Weak to {PLANET_TYPES[world].weakTo}: {PLANET_TYPES[world].weakWhy}.

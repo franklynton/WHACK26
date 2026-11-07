@@ -25,7 +25,7 @@ Optimise for a working, impressive live demo over completeness.
 - `src/components/Game.tsx`: the HUD. Polls the sim ~3x a second, queues sim events for narration (per nation), and runs one LLM call at a time. Each nation has its own civ, chat and mind; minds take turns to think.
 - `src/types/world.ts`: shared types. `World` is the snapshot sent to the LLM.
 - `src/lib/narrator.ts` + `/api/narrate` (genesis and reactions to events) and `/api/mind` (the mind talks to the god and picks a `Policy`). Every LLM call has a canned fallback, so it works without a key.
-- Galaxy (multiplayer): `src/components/Galaxy.tsx` + `/api/galaxy` + `supabase/migrations/`. Every planet syncs a snapshot every 5s; when your nation reaches the Space Age (`sim.spacefaring`) the Galaxy button unlocks trades and invasions with online planets, settled by SQL functions and applied to each sim (`galaxyTrade`, `invadedFromSpace`).
+- Galaxy (multiplayer): `src/components/Galaxy.tsx` + `/api/galaxy` + `supabase/migrations/`. Every planet syncs a snapshot every 5s; when your nation reaches the Space Age (`sim.spacefaring`) the Galaxy button unlocks trades and invasions with online planets, settled by SQL functions and applied to each sim (`galaxyTrade`, `galaxyLoot`, `invadedFromSpace`). Galaxy codes (`src/lib/galaxyCode.ts`, migration 003) keep groups of planets apart.
 - `src/components/Landing.tsx`: the front page.
 
 ## Rules
