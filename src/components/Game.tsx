@@ -8,7 +8,7 @@ import Globe from "./Globe";
 import LeaderDialog from "./LeaderDialog";
 import Portrait, { type Mood } from "./Portrait";
 import { ERAS, RACE, type RaceId } from "@/sim/races";
-import { PLANET_TYPES, PlanetSim, SECONDS_PER_YEAR, type SimEvent } from "@/sim/planet";
+import { GOAL_YEAR, MIRACLES, PLANET_TYPES, PlanetSim, SECONDS_PER_YEAR, type MiracleId, type SimEvent } from "@/sim/planet";
 import { sound } from "@/lib/sound";
 import { fallbackCiv, fallbackLeader, fallbackReaction, fallbackThought, type LeaderReply } from "@/lib/narrator";
 import type { ChronicleEntry, ChronicleKind, Civ, Crisis, LeaderMessage, MindMessage, NationInfo, Needs, PlanetStats, Policy, Relation, World } from "@/types/world";
@@ -44,6 +44,7 @@ interface Hud {
   alert: PlanetSim["alert"];
   output: number;
   military: number;
+  god: { devotion: number; ready: PlanetSim["ready"]; prayers: PlanetSim["prayers"]; choice: PlanetSim["choice"]; outcome: PlanetSim["outcome"]; avgLove: number };
 }
 
 export default function Game({ playerName, planetName = "Arda", race, worldType }: { playerName: string; planetName?: string; race?: RaceId; worldType?: number }) {
@@ -80,6 +81,19 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
     };
   }, []);
   const [hud, setHud] = useState<Hud>(() => readHud(sim));
+  const [miracle, setMiracle] = useState<MiracleId | null>(null); // picked from the bar; click the land to cast
+  const [seenOutcome, setSeenOutcome] = useState(false);
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setMiracle(null);
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, []);
+  const cast = (face: number) => {
+    if (miracle && sim.cast(miracle, face)) {
+      setMiracle(null);
+      setHud(readHud(sim));
+    }
+  };
   const [civs, setCivs] = useState<(Civ | null)[]>(() => new Array(count).fill(null));
   const [chats, setChats] = useState<MindMessage[][]>(() => Array.from({ length: count }, () => []));
   const [reasons, setReasons] = useState<string[]>(() => new Array(count).fill(""));
@@ -343,7 +357,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
   return (
     <main className="relative h-dvh w-full overflow-hidden select-none">
       <div className="absolute inset-0 isolate">
-        <Globe sim={sim} tool="hand" speed={1} onPaint={() => {}} onHover={hoverAt} focus={focus} />
+        <Globe sim={sim} tool={miracle ? MIRACLES.find((m) => m.id === miracle)!.tool : "hand"} speed={1} onPaint={(_, face) => cast(face)} onHover={hoverAt} focus={focus} />
       </div>
 
       {/* The planet and its nations */}
@@ -369,6 +383,11 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
               <p className="text-xl font-bold tabular-nums">{hud.military}</p>
             </div>
           </div>
+          <div className="mb-2 rounded-lg bg-amber-300/10 px-2.5 py-1.5" title="Your power. Nations earn it for you by worshipping; it grows faster when they love you. Spend it on miracles, prayers and interventions.">
+            <p className="text-[10px] uppercase tracking-wider text-amber-200/70">Devotion</p>
+            <p className="text-xl font-bold tabular-nums">✨ {Math.floor(hud.god.devotion)}</p>
+          </div>
+          <Goal hud={hud} />
           <p className="text-xs text-white/45">{sim.type.blurb}</p>
           <p className="text-sm text-white/60">
             {stats.population.toLocaleString()} people · {stats.villages} {stats.villages === 1 ? "village" : "villages"}
@@ -440,7 +459,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
             {muted ? "🔇" : "🔊"}
           </button>
         </div>
-        {!awake && <p className="text-xs text-white/55">Your nations are wandering. When each founds a village it will become aware of you. Your words are your only power: talk them out of fighting.</p>}
+        {!awake && <p className="text-xs text-white/55">Your nations are wandering. When each founds a village it will become aware of you. Once they worship you, you earn devotion to spend on miracles.</p>}
       </aside>
 
       {/* Pop-up: what is happening on the planet right now (disasters, weather, fate) */}
@@ -461,7 +480,63 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
 
       {/* Fate: the latest thing the heavens did, and the controls hint */}
       <div className="pointer-events-none absolute bottom-4 left-[17.5rem] right-[19.5rem] flex flex-col items-center gap-2">
-        <p className="text-xs text-white/40">Drag to rotate · scroll to zoom · fate decides the weather, you can only talk</p>
+        {hud.god.choice && (
+          <ChoiceCard
+            choice={hud.god.choice}
+            devotion={hud.god.devotion}
+            names={hud.nations}
+            onPick={(yes) => {
+              sim.decide(yes);
+              setHud(readHud(sim));
+            }}
+            onShow={() => setFocus({ face: hud.god.choice!.face, key: Date.now() })}
+          />
+        )}
+        {hud.god.prayers.slice(-3).map((p) => (
+          <div key={p.id} className="glass pointer-events-auto flex w-[30rem] max-w-full items-center gap-3 px-4 py-2.5 text-sm">
+            <span className="text-xl">🙏</span>
+            <span className="flex-1">{cap(p.text)}</span>
+            <button
+              disabled={hud.god.devotion < p.cost}
+              onClick={() => {
+                sim.answerPrayer(p.id, true);
+                setHud(readHud(sim));
+              }}
+              className="rounded-lg bg-amber-300/20 px-2.5 py-1 text-xs font-semibold transition hover:bg-amber-300/30 disabled:opacity-40"
+            >
+              Answer ✨{p.cost}
+            </button>
+            <button
+              onClick={() => {
+                sim.answerPrayer(p.id, false);
+                setHud(readHud(sim));
+              }}
+              className="rounded-lg bg-white/5 px-2.5 py-1 text-xs transition hover:bg-white/10"
+            >
+              Ignore
+            </button>
+          </div>
+        ))}
+        <div className="glass pointer-events-auto flex gap-1.5 p-1.5">
+          {MIRACLES.map((m) => {
+            const wait = Math.ceil(hud.god.ready[m.id] - hud.year);
+            const off = wait > 0 || hud.god.devotion < m.cost;
+            return (
+              <button
+                key={m.id}
+                onClick={() => setMiracle((x) => (x === m.id ? null : m.id))}
+                disabled={off && miracle !== m.id}
+                title={m.blurb}
+                className={`relative w-24 rounded-lg px-2 py-1.5 text-center transition disabled:opacity-40 ${miracle === m.id ? "bg-amber-300/30 ring-1 ring-amber-200" : "bg-white/5 hover:bg-white/10"}`}
+              >
+                <div className="text-lg leading-none">{m.icon}</div>
+                <div className="mt-0.5 text-[11px] font-semibold">{m.name}</div>
+                <div className="text-[10px] text-amber-200/80">{wait > 0 ? `ready in ${wait}s` : `✨ ${m.cost}`}</div>
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-xs text-white/40">{miracle ? "Click the land to cast · Esc to cancel" : "Drag to rotate · scroll to zoom · pick a miracle, then click the land"}</p>
       </div>
 
       {talkTo != null && hud.nations[talkTo] && (
@@ -496,7 +571,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
               <span className="block text-xs text-sky-300">🗣️ Talk to the leader</span>
             </span>
           </button>
-          <NeedBars needs={me.needs} crisis={me.crisis} />
+          <NeedBars needs={me.needs} crisis={me.crisis} love={me.love} />
           {civ ? (
             <>
               <p>
@@ -551,6 +626,23 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
           ))}
         </ol>
       </aside>
+      {hud.god.outcome && !seenOutcome && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="glass w-[26rem] p-6 text-center">
+            <div className="text-5xl">{hud.god.outcome.won ? "🏆" : "🌑"}</div>
+            <h2 className="mt-3 text-2xl font-bold">{hud.god.outcome.title}</h2>
+            <p className="mt-2 text-sm text-white/75">{hud.god.outcome.text}</p>
+            <div className="mt-5 flex justify-center gap-2">
+              <button onClick={() => setSeenOutcome(true)} className="rounded-lg bg-white/10 px-4 py-2 text-sm font-semibold hover:bg-white/20">
+                Keep watching
+              </button>
+              <button onClick={() => location.reload()} className="rounded-lg bg-sky-400/30 px-4 py-2 text-sm font-semibold hover:bg-sky-400/40">
+                New planet
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
@@ -558,7 +650,8 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
 
 function readHud(sim: PlanetSim): Hud {
-  return { year: sim.year, stats: sim.stats(), needs: sim.needs(), nations: sim.nationInfo(), fate: sim.fate, alert: sim.alert, output: Math.round(sim.output), military: sim.military() };
+  return { year: sim.year, stats: sim.stats(), needs: sim.needs(), nations: sim.nationInfo(), fate: sim.fate, alert: sim.alert, output: Math.round(sim.output), military: sim.military(),
+    god: { devotion: sim.devotion, ready: { ...sim.ready }, prayers: [...sim.prayers], choice: sim.choice, outcome: sim.outcome, avgLove: sim.avgLove() } };
 }
 
 // Calls an LLM route. If the server can't be reached (for example the static demo build,
@@ -637,10 +730,11 @@ function Stock({ icon, label, info, value, align = "center" }: { icon: string; l
   );
 }
 
-function NeedBars({ needs, crisis }: { needs: Needs; crisis: Crisis | null }) {
+function NeedBars({ needs, crisis, love }: { needs: Needs; crisis: Crisis | null; love?: number }) {
   const bars: [string, number][] = [
     ["Food", needs.food],
     ["Stability", needs.stability],
+    ...(love != null ? [["Love for you", love] as [string, number]] : []),
   ];
   return (
     <div className="space-y-1.5">
@@ -660,3 +754,53 @@ function NeedBars({ needs, crisis }: { needs: Needs; crisis: Crisis | null }) {
   );
 }
 
+
+// The goal, and how close the god is to it.
+function Goal({ hud }: { hud: Hud }) {
+  const mine = hud.nations[0];
+  const year = Math.floor(hud.year / SECONDS_PER_YEAR);
+  const love = Math.round(hud.god.avgLove);
+  return (
+    <div className="mb-2 rounded-lg border border-white/10 px-2.5 py-2 text-xs" title="Lose if your people fall, or if every nation comes to hate you.">
+      <p className="text-[10px] uppercase tracking-wider text-white/50">Goal</p>
+      <p className="text-white/80">
+        Keep {mine ? cap(mine.name) : "your people"} alive to Year {GOAL_YEAR}, loved by the nations.
+      </p>
+      <div className="mt-1.5 flex justify-between text-white/60">
+        <span>
+          Year {Math.min(year, GOAL_YEAR)}/{GOAL_YEAR}
+        </span>
+        <span className={love >= 50 ? "text-emerald-300" : love < 25 ? "text-rose-300" : "text-amber-200"}>Love {love}/50</span>
+      </div>
+      <div className="mt-1 h-1 overflow-hidden rounded-full bg-white/10">
+        <div className="h-full bg-sky-300" style={{ width: `${Math.min(100, (year / GOAL_YEAR) * 100)}%` }} />
+      </div>
+    </div>
+  );
+}
+
+// A disaster, war or revolution has begun: step in (for devotion) or let fate decide.
+function ChoiceCard({ choice, devotion, names, onPick, onShow }: { choice: NonNullable<Hud["god"]["choice"]>; devotion: number; names: NationInfo[]; onPick: (intervene: boolean) => void; onShow: () => void }) {
+  const what = { disaster: "Turn it aside", war: "Force a peace", revolution: "Calm the people" }[choice.kind];
+  const who = choice.nations.map((n) => names[n]?.name).filter(Boolean).map((n) => cap(n!)).join(" and ");
+  return (
+    <div className="glass alert-pop pointer-events-auto w-[30rem] max-w-full px-4 py-3">
+      <div className="flex items-center gap-2">
+        <span className="text-base font-bold">{choice.title}</span>
+        <span className="text-xs text-white/50">{who}</span>
+        <button onClick={onShow} className="ml-auto text-xs text-sky-300 hover:underline">
+          Show me
+        </button>
+      </div>
+      <p className="mt-0.5 text-sm text-white/75">{choice.text}</p>
+      <div className="mt-2 flex gap-2">
+        <button disabled={devotion < choice.cost} onClick={() => onPick(true)} className="flex-1 rounded-lg bg-amber-300/20 px-3 py-1.5 text-sm font-semibold transition hover:bg-amber-300/30 disabled:opacity-40">
+          {what} ✨{choice.cost}
+        </button>
+        <button onClick={() => onPick(false)} className="flex-1 rounded-lg bg-white/5 px-3 py-1.5 text-sm transition hover:bg-white/10">
+          Let fate decide
+        </button>
+      </div>
+    </div>
+  );
+}

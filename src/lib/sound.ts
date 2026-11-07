@@ -7,7 +7,7 @@ type Fx = "rumble" | "thunder" | "wave" | "whoosh" | "boom" | "chime" | "horn" |
 const BY_ICON: Record<string, Fx> = {
   "🌋": "rumble", "🫨": "rumble", "⛈️": "thunder", "🌊": "wave", "🌧️": "wave", "☄️": "whoosh", "💥": "boom",
   "🏘️": "chime", "🏙️": "chime", "⛵": "chime", "🌲": "chime", "🕊️": "chime", "⚔️": "horn", "😈": "horn",
-  "🏳️": "horn", "👑": "horn", "⚓": "chime", "💀": "toll", "☠️": "toll", "☀️": "toll", "📜": "fanfare", "🚀": "fanfare", "✨": "sparkle",
+  "🏳️": "horn", "👑": "horn", "⚓": "chime", "🏴‍☠️": "horn", "🙏": "sparkle", "⚡": "thunder", "💀": "toll", "☠️": "toll", "☀️": "toll", "📜": "fanfare", "🚀": "fanfare", "✨": "sparkle",
   "⛰️": "rumble", "🔥": "fire",
 };
 
