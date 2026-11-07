@@ -38,7 +38,8 @@ export function genesisPrompt(w: World) {
 
 Your people have just founded their first village and become self-aware. Invent yourselves. Return JSON:
 {"civ":{"name":string,"demonym":string,"language":{"name":string,"words":{"god":string,"water":string,"food":string,"enemy":string,"friend":string}},"religion":{"name":string,"godName":string,"belief":string},"attitude":"worship","myths":[string],"laws":[string]},"text":string}
-"godName" is what you call the god. "text" is the first chronicle entry, 1-2 sentences.${w.nation?.relations.length ? `\nYour name, language and religion must be clearly different from your neighbours: ${w.nation.relations.map((r) => r.name).join(", ")}.` : ""}`,
+"godName" is what you call the god. "text" is the first chronicle entry, 1-2 sentences.
+The religion must be entirely made up: its own name, rites, sacred places and beliefs shaped by this planet. Never borrow real-world religions, gods, prophets, scriptures or religious terms.${w.nation?.relations.length ? `\nYour name, language and religion must be clearly different from your neighbours: ${w.nation.relations.map((r) => r.name).join(", ")}.` : ""}`,
   };
 }
 

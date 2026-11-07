@@ -1,4 +1,4 @@
-# Petri
+# Arda
 
 A god game on your own 3D planet, built for WHACK26. Tiny AI-driven people live on it, worship you, talk back, and decide what to do next. Keep them at peace, grow your resources, and trade with (or invade) other gods' planets.
 
