@@ -15,8 +15,9 @@ Optimise for a working, impressive live demo over completeness.
 
 ## How it fits together
 - `src/sim/planet.ts`: `PlanetSim`, the whole simulation. ~27k triangular tiles in typed arrays (elevation, moisture, forest, food, fire, deposits), people, villages, god powers (`apply`), random disasters, needs, resources, planet types. Mutated in place for speed.
+- Nations (`seedNations`, 2-5 per planet): each has its own policy, needs, borders (`owner`) and relations (peace, trade, rival, war) driven by `tension`. Crowded villages send pioneers to found new ones. The Peace and Discord powers and each mind's `toward` stance move tension.
 - `src/components/Globe.tsx`: renders the sim (tiles as one mesh, people and houses as instanced meshes) and turns mouse drags into god powers. It also steps the sim every frame.
-- `src/components/Game.tsx`: the HUD. Polls the sim ~3x a second, queues sim events for narration, and runs one LLM call at a time.
+- `src/components/Game.tsx`: the HUD. Polls the sim ~3x a second, queues sim events for narration (per nation), and runs one LLM call at a time. Each nation has its own civ, chat and mind; minds take turns to think.
 - `src/types/world.ts`: shared types. `World` is the snapshot sent to the LLM.
 - `src/lib/narrator.ts` + `/api/narrate` (genesis and reactions to events) and `/api/mind` (the mind talks to the god and picks a `Policy`). Every LLM call has a canned fallback, so it works without a key.
 - `src/components/Landing.tsx`: the front page.

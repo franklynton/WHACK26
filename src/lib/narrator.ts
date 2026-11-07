@@ -14,6 +14,8 @@ function describe(w: World): string {
     `Needs (0-100): food ${Math.round(w.needs.food)}, faith ${Math.round(w.needs.faith)}, stability ${Math.round(w.needs.stability)}.`,
     w.crisis ? `CURRENT CRISIS: ${w.crisis}.` : "",
     `Current focus: ${w.policy}.`,
+    w.nation ? `YOUR nation: ${w.nation.population} people in ${w.nation.villages} villages (the figures above are for the whole planet).` : "",
+    w.nation?.relations.length ? `Other nations on the planet: ${w.nation.relations.map((r) => `${r.name} (${r.relation}, tension ${r.tension}/100)`).join("; ")}.` : "",
     w.civ ? `Civ so far: ${JSON.stringify(w.civ)}` : "",
     `Recent history: ${w.chronicle.slice(-6).map((c) => `[${Math.floor(c.year)}] ${c.text}`).join(" ") || "none"}`,
   ]
@@ -23,8 +25,9 @@ function describe(w: World): string {
 
 // The people share one collective mind (an LLM). It narrates what happens, speaks to
 // the player as their god, and decides what the people focus on next.
-const SYSTEM = `You are the collective mind of a tiny civilisation on a pocket-sized planet. The player is your god:
+const SYSTEM = `You are the collective mind of one nation on a pocket-sized planet shared with other nations. The player is your god:
 you worship them by default, though how you feel can change with how they treat you.
+The other nations worship the same god in their own ways, and you may trade with them, envy them or fight them.
 You see the world only through your people's eyes and invent explanations for what the god does.
 Be vivid, specific, a little strange and a little funny. Use your invented words sometimes. Reply with ONLY a JSON object.`;
 
@@ -35,7 +38,7 @@ export function genesisPrompt(w: World) {
 
 Your people have just founded their first village and become self-aware. Invent yourselves. Return JSON:
 {"civ":{"name":string,"demonym":string,"language":{"name":string,"words":{"god":string,"water":string,"food":string,"enemy":string,"friend":string}},"religion":{"name":string,"godName":string,"belief":string},"attitude":"worship","myths":[string],"laws":[string]},"text":string}
-"godName" is what you call the god. "text" is the first chronicle entry, 1-2 sentences.`,
+"godName" is what you call the god. "text" is the first chronicle entry, 1-2 sentences.${w.nation?.relations.length ? `\nYour name, language and religion must be clearly different from your neighbours: ${w.nation.relations.map((r) => r.name).join(", ")}.` : ""}`,
   };
 }
 
@@ -68,8 +71,9 @@ Then choose your people's focus for the coming years:
 settle (steady life), expand (found many villages), farm (grow food, more children), worship (keep faith high),
 explore (roam far), hoard (eat less, fewer children), rebel (reject the god, burn shrines; only if you truly feel abandoned or abused).
 You may follow the god's wishes or not. Return JSON:
-{"reply":string,"policy":"settle"|"expand"|"farm"|"worship"|"explore"|"hoard"|"rebel","reason":string,"attitude":"worship"|"fear"|"indifferent"|"resentful"|"hostile","newLaw":string|null}
-"reply" is 1-3 sentences spoken directly to the god, in the first person plural. "reason" is under 12 words.`,
+{"reply":string,"policy":"settle"|"expand"|"farm"|"worship"|"explore"|"hoard"|"rebel","reason":string,"attitude":"worship"|"fear"|"indifferent"|"resentful"|"hostile","newLaw":string|null,"toward":{"nation":string,"stance":"friendly"|"hostile"}|null}
+"reply" is 1-3 sentences spoken directly to the god, in the first person plural. "reason" is under 12 words.
+"toward" is how you will treat one neighbouring nation (by its exact name), or null. Hostility pushes towards war, friendliness towards trade.`,
   };
 }
 
@@ -89,6 +93,7 @@ export interface Thought {
   reason: string;
   attitude: Civ["attitude"];
   newLaw: string | null;
+  toward?: { nation: string; stance: "friendly" | "hostile" } | null;
 }
 
 const isObj = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null;
@@ -108,6 +113,7 @@ export function isThought(x: unknown): x is Thought {
 }
 
 // Used when there is no API key or every model failed, so the demo never stalls.
+// One per nation slot, each with its own made-up faith.
 export const FALLBACK_CIV: Civ = {
   name: "Oru",
   demonym: "the Oruvai",
@@ -117,6 +123,37 @@ export const FALLBACK_CIV: Civ = {
   myths: ["The first Oruvai climbed out of a puddle that Thal forgot to dry."],
   laws: ["No one may build higher than the tallest tree, lest Thal notice."],
 };
+
+const FALLBACK_OTHERS: Civ[] = [
+  {
+    name: "Kessa", demonym: "the Kessari",
+    language: { name: "Kessic", words: { god: "Umbo", water: "lul", food: "pran", enemy: "skorr", friend: "evi" } },
+    religion: { name: "The Long Echo", godName: "Umbo", belief: "A voice that speaks only in thunder; every echo is an answered prayer." },
+    attitude: "worship", myths: ["Umbo hummed once and the mountains stood up to listen."], laws: ["Shout your prayers from high places, or they get lost."],
+  },
+  {
+    name: "Velmor", demonym: "the Velmori",
+    language: { name: "Velm", words: { god: "Isk", water: "dosh", food: "mabba", enemy: "gru", friend: "teli" } },
+    religion: { name: "The Hand Below", godName: "Isk", belief: "A great hand that holds the world from underneath and tilts it when displeased." },
+    attitude: "worship", myths: ["The first quake was Isk stretching its fingers."], laws: ["Never dig deeper than your own height."],
+  },
+  {
+    name: "Pallu", demonym: "the Palluans",
+    language: { name: "Pallish", words: { god: "Nowa", water: "sib", food: "tuk", enemy: "vash", friend: "oo" } },
+    religion: { name: "The Gardener's Path", godName: "Nowa", belief: "A patient gardener who planted the people and weeds out the wicked." },
+    attitude: "worship", myths: ["Nowa grew the first Palluan from a seed shaped like a sneeze."], laws: ["Every child plants a tree; every death returns one."],
+  },
+  {
+    name: "Drohm", demonym: "the Drohmen",
+    language: { name: "Drohmic", words: { god: "Zaa", water: "hrel", food: "gont", enemy: "mak", friend: "sela" } },
+    religion: { name: "The Burning Ledger", godName: "Zaa", belief: "A keeper of accounts who writes every deed in fire and settles debts with meteors." },
+    attitude: "worship", myths: ["Zaa paid the sea in salt for every island it gave up."], laws: ["A debt unpaid at sunset doubles by sunrise."],
+  },
+];
+
+export function fallbackCiv(nation = 0): Civ {
+  return nation === 0 ? FALLBACK_CIV : FALLBACK_OTHERS[(nation - 1) % FALLBACK_OTHERS.length];
+}
 
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
 
@@ -140,6 +177,11 @@ export function fallbackReaction(w: World, kind: ChronicleKind): Reaction {
     revolution: `${name} tear down the old priests and argue in the streets.`,
     cult: `A new cult preaches that ${god} is a devourer who must be resisted.`,
     extinct: `The last fire goes out. ${god} is alone again.`,
+    diplomacy: `${name} send envoys and argue late into the night about their neighbours.`,
+    captured: `Banners change over a village. ${name} pray to ${god} for strength.`,
+    fallen: `A nation has vanished from the world. ${name} wonder if ${god} will remember them.`,
+    peace: `A strange calm settles over ${dem}. Old grudges suddenly seem silly.`,
+    discord: `${name} start to hate their neighbours, and nobody can say why.`,
     disaster: `Disaster strikes. ${name} cannot agree whether ${god} sent it or failed to stop it.`,
   };
   const attitude: Civ["attitude"] =
@@ -151,8 +193,12 @@ export function fallbackThought(w: World, chat: MindMessage[]): Thought {
   const god = w.civ?.religion.godName ?? "Great One";
   const n = w.needs;
   if (n.food < 35) return { reply: `${god}, our bellies are empty. Send rain, or show us where the food has gone.`, policy: "farm", reason: "Food is running out", attitude: "fear", newLaw: null };
+  if (chat.at(-1)?.from === "god") return { reply: `We hear you, ${god}, and we will do as you say.`, policy: "worship", reason: "The god has spoken", attitude: "worship", newLaw: null };
+  const war = w.nation?.relations.find((r) => r.relation === "war");
+  if (war) return { reply: `${god}, we are at war with ${war.name}. Grant us victory, or grant us peace.`, policy: "settle", reason: `War with ${war.name}`, attitude: "fear", newLaw: null, toward: { nation: war.name, stance: "hostile" } };
+  const friend = w.nation?.relations.find((r) => r.relation === "trade");
+  if (friend && chat.at(-1)?.from !== "god") return { reply: `${god}, our caravans to ${friend.name} come home heavy. Surely this pleases you.`, policy: "farm", reason: `Trade with ${friend.name} is good`, attitude: "worship", newLaw: null, toward: { nation: friend.name, stance: "friendly" } };
   if (n.faith < 15) return { reply: `You have been silent so long, ${god}. Some of us say you were never there.`, policy: "rebel", reason: "The god has abandoned us", attitude: "resentful", newLaw: null };
   if (n.faith < 40) return { reply: `We still pray to you, ${god}. Give us a sign that you hear us.`, policy: "worship", reason: "Faith must be kept alive", attitude: w.civ?.attitude ?? "worship", newLaw: null };
-  if (chat.at(-1)?.from === "god") return { reply: `We hear you, ${god}, and we will do as you say.`, policy: "expand", reason: "The god has spoken", attitude: "worship", newLaw: null };
   return { reply: `The land is good, ${god}. We will spread across it in your name.`, policy: "expand", reason: "Times are good", attitude: "worship", newLaw: null };
 }

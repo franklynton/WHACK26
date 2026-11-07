@@ -25,6 +25,7 @@ const COLORS: Record<T, string> = {
 const FARM = new THREE.Color("#c9cf5b");
 // Deposits are speckled onto some of their tiles so the player can spot them.
 const DEPOSIT: Record<D, THREE.Color | null> = { [D.None]: null, [D.Metal]: new THREE.Color("#5b6f8f"), [D.Gold]: new THREE.Color("#ffd447"), [D.Herbs]: new THREE.Color("#b066d6") };
+const WHITE = new THREE.Color("#ffffff");
 const SCORCH = new THREE.Color("#3a2f2a");
 const FIRE = [new THREE.Color("#ff6a1a"), new THREE.Color("#ffc23a")];
 const LAND_HEIGHT = 0.07; // how far mountains stand out from the sea
@@ -64,6 +65,7 @@ function PlanetMesh({ sim, tool, onPaint }: { sim: PlanetSim; tool: Tool; onPain
     }
     const c = new THREE.Color();
     const v = new THREE.Vector3();
+    const nationCols = sim.nations.map((n) => new THREE.Color(n.color));
     for (let f = 0; f < sim.n; f++) {
       const t = sim.terrain[f] as T;
       if (sim.fire[f] > 0) c.copy(FIRE[Math.random() < 0.5 ? 0 : 1]);
@@ -73,6 +75,13 @@ function PlanetMesh({ sim, tool, onPaint }: { sim: PlanetSim; tool: Tool; onPain
         const dep = DEPOSIT[sim.deposit[f] as D];
         if (dep && tileRand(f, 3) < 0.45) c.lerp(dep, 0.5);
         if (sim.scorch[f] > 0) c.lerp(SCORCH, Math.min(0.8, sim.scorch[f] / 20));
+        // Nation territory: a light wash of its colour, with a strong line along the border.
+        const o = sim.owner[f];
+        if (o >= 0) {
+          let edge = false;
+          for (let k = 0; k < 3; k++) if (sim.owner[sim.neighbours[f * 3 + k]] !== o) edge = true;
+          c.lerp(nationCols[o], edge ? 0.7 : 0.18);
+        }
         // Small per-tile variation gives a hand-painted, pixel-art feel.
         c.offsetHSL(0, 0, (tileRand(f) - 0.5) * 0.06);
       }
@@ -145,6 +154,7 @@ function People({ sim }: { sim: PlanetSim }) {
   const up = useMemo(() => new THREE.Vector3(0, 1, 0), []);
   const q = useMemo(() => new THREE.Quaternion(), []);
   const s = useMemo(() => new THREE.Vector3(1, 1, 1), []);
+  const cols = useMemo(() => sim.nations.map((n) => new THREE.Color(n.color).lerp(WHITE, 0.25)), [sim]);
 
   useFrame(() => {
     const mesh = ref.current;
@@ -163,15 +173,17 @@ function People({ sim }: { sim: PlanetSim }) {
       s.setScalar(p.age < 14 ? 0.6 : 1);
       m.compose(a, q, s);
       mesh.setMatrixAt(i, m);
+      mesh.setColorAt(i, cols[p.nation] ?? WHITE);
     }
     mesh.count = count;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     mesh.instanceMatrix.needsUpdate = true;
   });
 
   return (
     <instancedMesh ref={ref} args={[undefined, undefined, MAX_FIGURES]} frustumCulled={false}>
       <capsuleGeometry args={[0.0035, 0.007, 2, 6]} />
-      <meshStandardMaterial color="#ffe1b8" emissive="#5a2d0c" emissiveIntensity={0.4} />
+      <meshStandardMaterial color="#ffffff" emissive="#3a2a20" emissiveIntensity={0.4} />
     </instancedMesh>
   );
 }
@@ -186,6 +198,7 @@ function Houses({ sim }: { sim: PlanetSim }) {
   const up = useMemo(() => new THREE.Vector3(0, 1, 0), []);
   const q = useMemo(() => new THREE.Quaternion(), []);
   const s = useMemo(() => new THREE.Vector3(1, 1, 1), []);
+  const cols = useMemo(() => sim.nations.map((n) => new THREE.Color(n.color).multiplyScalar(0.8)), [sim]);
 
   useFrame(() => {
     const mesh = ref.current;
@@ -209,16 +222,18 @@ function Houses({ sim }: { sim: PlanetSim }) {
         s.setScalar(k === 0 ? 1.6 : 1); // the first house is the shrine
         m.compose(p, q, s);
         mesh.setMatrixAt(i, m);
+        mesh.setColorAt(i, k === 0 ? WHITE : (cols[v.nation] ?? WHITE));
       }
     }
     mesh.count = i;
     mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   });
 
   return (
     <instancedMesh ref={ref} args={[undefined, undefined, MAX_HOUSES]} frustumCulled={false}>
       <boxGeometry args={[0.01, 0.011, 0.01]} />
-      <meshStandardMaterial color="#c0583a" roughness={0.8} />
+      <meshStandardMaterial color="#ffffff" roughness={0.8} />
     </instancedMesh>
   );
 }

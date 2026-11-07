@@ -3,7 +3,7 @@
 // mutated in place for speed; React only polls `snapshot()` a few times a second.
 import * as THREE from "three";
 import { fbm, tileRand } from "./noise";
-import type { Crisis, GodPower, Needs, PlanetStats, Policy, Resources } from "@/types/world";
+import type { Crisis, GodPower, NationInfo, Needs, PlanetStats, Policy, Relation, Resources } from "@/types/world";
 
 export const DETAIL = 36; // tiles = 20 * (DETAIL + 1)^2
 
@@ -39,6 +39,8 @@ export interface Person {
   hunger: number; // 1 = full, 0 = starved
   age: number; // years (1 second = 1 year)
   village: number | null;
+  nation: number; // index into PlanetSim.nations
+  goal?: number; // a pioneer walking to this tile to found a new village
 }
 
 export interface Village {
@@ -47,12 +49,31 @@ export interface Village {
   name: string;
   residents: number;
   houses: number;
+  nation: number;
 }
+
+// A nation: one people with its own AI mind, religion, focus and needs.
+// Nations share the planet, so their borders touch and they trade or fight.
+export interface Nation {
+  id: number; // index into PlanetSim.nations
+  name: string; // placeholder until its mind names itself
+  color: string;
+  policy: Policy;
+  faith: number;
+  stability: number;
+  recentDeaths: number;
+  alive: boolean;
+}
+
+export const NATION_COLORS = ["#e63946", "#ffd166", "#b56cff", "#ff70a6", "#ff8c42"];
+const NATION_HUES = ["Red", "Gold", "Violet", "Rose", "Amber"]; // placeholder names until each mind names itself
 
 // Something the narrator might want to talk about.
 export interface SimEvent {
-  kind: GodPower | Crisis | "village" | "milestone" | "extinct" | "disaster";
+  kind: GodPower | Crisis | "village" | "milestone" | "extinct" | "disaster" | "diplomacy" | "captured" | "fallen";
   detail: string;
+  nation?: number; // the nation this is mostly about (narrated from its point of view)
+  other?: number; // the other nation, for diplomacy and captures
 }
 
 // Every planet rolls a type, so planets are rich in different resources and
@@ -103,14 +124,16 @@ export class PlanetSim {
   events: SimEvent[] = [];
   year = 0;
   version = 0; // bumps whenever the look of the terrain changes
-  faith = 50;
+  nations: Nation[] = [];
+  // Between every pair of nations: how they stand and how much tension has built up (0-100).
+  relation: Relation[][] = [];
+  tension: number[][] = [];
+  owner: Int8Array; // which nation's land each tile is, -1 = nobody's
+  private contact: number[][] = []; // how many border tiles each pair of nations shares
+  private borderTimer = 0;
   // Stockpiled resources: the planet's score, and later what it trades with other planets.
   // Production is scaled by stability, so a peaceful planet out-produces a troubled one.
   resources: Resources = { food: 0, wood: 0, stone: 0, metal: 0, gold: 0, herbs: 0 };
-  // What the people's shared mind (the LLM) has decided to focus on. Changes how agents behave.
-  policy: Policy = "settle";
-  stability = 70;
-  private recentDeaths = 0;
   private nextId = 1;
   private milestones = new Set<string>();
 
@@ -168,6 +191,7 @@ export class PlanetSim {
     this.farm = new Uint8Array(this.n);
     this.terrain = new Uint8Array(this.n);
     this.deposit = new Uint8Array(this.n);
+    this.owner = new Int8Array(this.n).fill(-1);
     this.generate();
   }
 
@@ -250,6 +274,11 @@ export class PlanetSim {
 
   apply(power: GodPower, centre: number, radius: number) {
     const area = this.tilesNear(centre, radius);
+    // Nations whose land or people are in the area feel the god's hand most.
+    const touched = this.nationsIn(area.map(([f]) => f));
+    const bless = (faith: number) => {
+      for (const nt of this.nations) if (nt.alive) nt.faith = Math.min(100, nt.faith + (touched.has(nt.id) ? faith : faith * 0.2));
+    };
     const clamp = (x: number) => Math.max(-1, Math.min(1, x));
     switch (power) {
       case "raise":
@@ -269,7 +298,7 @@ export class PlanetSim {
           this.moisture[f] = Math.min(1, this.moisture[f] + 0.08 * (0.5 + w));
           this.food[f] = Math.min(1, this.food[f] + 0.1);
         }
-        this.faith += 0.3;
+        bless(0.3);
         break;
       case "drought":
         for (const [f, w] of area) {
@@ -277,11 +306,11 @@ export class PlanetSim {
           this.food[f] *= 0.6;
           if (this.moisture[f] < 0.3 && Math.random() < 0.3) this.forest[f] = 0;
         }
-        this.faith += 0.4;
+        bless(0.4);
         break;
       case "fire":
         for (const [f] of area) this.ignite(f);
-        this.faith += 0.5;
+        bless(0.5);
         break;
       case "miracle":
         for (const [f] of area) {
@@ -291,7 +320,7 @@ export class PlanetSim {
         }
         for (const p of this.people) if (area.some(([f]) => f === p.face)) p.hunger = 1;
         this.burning.forEach((f) => this.fire[f] === 0 && this.burning.delete(f));
-        this.faith += 12;
+        bless(12);
         break;
       case "meteor": {
         const crater = this.tilesNear(centre, radius * 1.6);
@@ -305,15 +334,23 @@ export class PlanetSim {
         const r = radius * 1.6;
         const killed = this.killWhere((p) => this.angle(p.face, centre) < r);
         this.villages = this.villages.filter((v) => this.angle(v.face, centre) >= r);
-        this.faith += 10;
-        this.stability -= 15;
-        this.events.push({ kind: "meteor", detail: `A meteor struck the planet, killing ${killed} people.` });
+        bless(10);
+        for (const id of touched) this.nations[id].stability -= 15;
+        this.events.push({ kind: "meteor", detail: `A meteor struck the planet, killing ${killed} people.`, nation: [...touched][0] });
         break;
       }
       case "spawn":
         for (let i = 0; i < 6; i++) this.spawnNear(centre);
-        this.faith += 1;
+        bless(1);
         break;
+      // Calm or inflame every nation in the area towards all the others.
+      case "peace":
+      case "discord": {
+        const d = power === "peace" ? -4 : 4;
+        for (const a of touched) for (const nt of this.nations) if (nt.id !== a) this.sway(a, nt.id, d);
+        bless(power === "peace" ? 0.4 : 0.2);
+        break;
+      }
     }
     for (const [f] of area) this.classify(f);
     if (power === "meteor") this.tilesNear(centre, radius * 1.6).forEach(([f]) => this.classify(f));
@@ -321,8 +358,64 @@ export class PlanetSim {
     const drowned = this.killWhere((p) => isWater(this.terrain[p.face] as T));
     if (drowned > 3) this.events.push({ kind: "lower", detail: `The sea rose and ${drowned} people drowned.` });
     this.villages = this.villages.filter((v) => !isWater(this.terrain[v.face] as T));
-    this.faith = Math.min(100, this.faith);
     this.version++;
+  }
+
+  // Which nations own land, or have people, among these tiles.
+  private nationsIn(tiles: number[]): Set<number> {
+    const set = new Set<number>(tiles.map((f) => this.owner[f]).filter((o) => o >= 0));
+    if (!set.size) {
+      const inArea = new Set(tiles);
+      for (const p of this.people) if (inArea.has(p.face)) set.add(p.nation);
+    }
+    return set;
+  }
+
+  // Change the tension between two nations (the god's powers, or a mind's wishes).
+  sway(a: number, b: number, delta: number) {
+    if (a === b || !this.tension[a]) return;
+    const t = Math.max(0, Math.min(100, this.tension[a][b] + delta));
+    this.tension[a][b] = this.tension[b][a] = t;
+  }
+
+  // ---- Nations ----
+
+  // Start 2-5 nations, each with a small band of people as far apart as the land allows.
+  seedNations(count = 2 + Math.floor(Math.random() * 4), peoplePerNation = 10) {
+    const starts = [this.bestStart()];
+    const candidates: number[] = [];
+    for (let f = 0; f < this.n; f += 3) if (this.terrain[f] === T.Grass || this.terrain[f] === T.Forest) candidates.push(f);
+    while (starts.length < count && candidates.length) {
+      let best = candidates[0], far = -1;
+      for (const f of candidates) {
+        const d = Math.min(...starts.map((s) => this.angle(s, f))) + this.moisture[f] * 0.1;
+        if (d > far) {
+          far = d;
+          best = f;
+        }
+      }
+      starts.push(best);
+    }
+    this.nations = starts.map((_, i) => ({ id: i, name: `the ${NATION_HUES[i]} tribe`, color: NATION_COLORS[i], policy: "settle" as Policy, faith: 50, stability: 70, recentDeaths: 0, alive: true }));
+    const k = this.nations.length;
+    this.relation = Array.from({ length: k }, () => new Array<Relation>(k).fill("peace"));
+    this.tension = Array.from({ length: k }, () => new Array<number>(k).fill(0));
+    for (let a = 0; a < k; a++) for (let b = a + 1; b < k; b++) this.tension[a][b] = this.tension[b][a] = 30 + Math.random() * 20;
+    this.contact = Array.from({ length: k }, () => new Array<number>(k).fill(0));
+    starts.forEach((f, i) => {
+      for (let j = 0; j < peoplePerNation; j++) this.spawnNear(f, i);
+    });
+  }
+
+  nationName(id: number) {
+    return this.nations[id]?.name ?? "a lost people";
+  }
+
+  private tradePartners(id: number) {
+    return this.relation[id]?.filter((r) => r === "trade").length ?? 0;
+  }
+  atWar(a: number, b: number) {
+    return a !== b && this.relation[a]?.[b] === "war";
   }
 
   private ignite(f: number) {
@@ -331,21 +424,37 @@ export class PlanetSim {
     this.burning.add(f);
   }
 
-  spawnNear(face: number) {
-    if (this.people.length >= MAX_PEOPLE) return;
+  spawnNear(face: number, nation?: number) {
+    if (this.people.length >= MAX_PEOPLE || !this.nations.length) return;
     // Walk outwards until we find dry land.
     let f = face;
     for (let i = 0; i < 20 && !walkable(this.terrain[f] as T); i++) f = this.neighbours[f * 3 + Math.floor(Math.random() * 3)];
     if (!walkable(this.terrain[f] as T)) return;
-    this.people.push({ id: this.nextId++, face: f, from: f, t: Math.random(), hunger: 0.8, age: 16 + Math.random() * 10, village: null });
+    // People the god creates join whoever owns the land, or the nearest nation.
+    const nat = nation ?? (this.owner[f] >= 0 ? this.owner[f] : this.nearestNation(f));
+    this.people.push({ id: this.nextId++, face: f, from: f, t: Math.random(), hunger: 0.8, age: 16 + Math.random() * 10, village: null, nation: nat });
+  }
+
+  nearestNation(f: number) {
+    let best = this.nations.find((n) => n.alive)?.id ?? 0, d = Infinity;
+    for (const p of this.people) {
+      const a = this.angle(p.face, f);
+      if (a < d) {
+        d = a;
+        best = p.nation;
+      }
+    }
+    return best;
   }
 
   private killWhere(test: (p: Person) => boolean) {
     const before = this.people.length;
-    this.people = this.people.filter((p) => !test(p));
-    const killed = before - this.people.length;
-    this.recentDeaths += killed;
-    return killed;
+    this.people = this.people.filter((p) => {
+      if (!test(p)) return true;
+      this.nations[p.nation].recentDeaths++;
+      return false;
+    });
+    return before - this.people.length;
   }
 
   // ---- Time ----
@@ -355,7 +464,8 @@ export class PlanetSim {
     this.stepFire(dt);
     this.stepFood(dt);
     this.stepPeople(dt);
-    this.stepVillages();
+    this.stepVillages(dt);
+    this.stepNations(dt);
     this.stepNeeds(dt);
     this.maybeDisaster(dt);
     this.checkMilestones();
@@ -386,7 +496,7 @@ export class PlanetSim {
     const lost = this.villages.filter((v) => this.fire[v.face] > 0);
     if (lost.length) {
       this.villages = this.villages.filter((v) => this.fire[v.face] <= 0);
-      this.events.push({ kind: "fire", detail: `Fire destroyed ${lost.map((v) => v.name).join(", ")}${burnt ? ` and killed ${burnt} people` : ""}.` });
+      this.events.push({ kind: "fire", detail: `Fire destroyed ${lost.map((v) => v.name).join(", ")}${burnt ? ` and killed ${burnt} people` : ""}.`, nation: lost[0].nation });
     }
     this.version++;
   }
@@ -406,12 +516,22 @@ export class PlanetSim {
   private stepPeople(dt: number) {
     const born: Person[] = [];
     const villageById = new Map(this.villages.map((v) => [v.id, v]));
+    // Who is standing where, so soldiers at war can find each other.
+    const at = new Map<number, Person[]>();
     for (const p of this.people) {
+      const list = at.get(p.face);
+      if (list) list.push(p);
+      else at.set(p.face, [p]);
+    }
+    const target = this.warTargets();
+    for (const p of this.people) {
+      const nt = this.nations[p.nation];
+      const pol = nt.policy;
       p.age += dt;
-      p.hunger -= (this.policy === "hoard" ? 0.035 : 0.05) * dt;
+      p.hunger -= (pol === "hoard" ? 0.035 : 0.05) * dt;
       p.t += dt / STEP_TIME;
-      if (p.village !== null && !villageById.has(p.village)) p.village = null;
-      if (p.t < 1) continue;
+      if (p.village !== null && villageById.get(p.village)?.nation !== p.nation) p.village = null;
+      if (p.t < 1 || p.hunger <= 0) continue;
 
       // Arrived: eat, then pick the next tile.
       p.t = 0;
@@ -421,8 +541,9 @@ export class PlanetSim {
       this.food[p.face] -= eat;
       p.hunger = Math.min(1, p.hunger + eat * 1.6);
       // Villagers gather for the stockpile: surplus food, wood from forests, stone from mountains.
+      // A stable nation works harder, and every trading partner adds a quarter more.
       if (home) {
-        const peace = 0.5 + this.stability / 100;
+        const peace = (0.5 + nt.stability / 100) * (1 + 0.25 * this.tradePartners(p.nation));
         const t = this.terrain[p.face] as T;
         if (p.hunger > 0.9 && this.food[p.face] > 0.2) {
           this.food[p.face] -= 0.1;
@@ -437,14 +558,47 @@ export class PlanetSim {
         if (d === D.Herbs) this.resources.herbs += 0.02 * peace * y.herbs;
       }
 
+      // War: fight any enemy on this tile or the next one. Either side may fall.
+      if (p.age > 16) {
+        for (let k = -1; k < 3; k++) {
+          const f = k < 0 ? p.face : this.neighbours[p.face * 3 + k];
+          const foe = at.get(f)?.find((q) => q.hunger > 0 && this.atWar(p.nation, q.nation));
+          if (foe && Math.random() < 0.35) {
+            // The more stable nation fights a little better.
+            const pWins = Math.random() < 0.5 + (nt.stability - this.nations[foe.nation].stability) / 400;
+            const dead = pWins ? foe : p;
+            dead.hunger = -1; // removed below
+            this.nations[dead.nation].recentDeaths += 1;
+            break;
+          }
+        }
+        if (p.hunger <= 0) continue;
+      }
+
+      // Soldiers march on the enemy; everyone else heads home or wanders towards food.
+      // Pioneers who reached their goal found a village there (if the land is still free).
+      if (p.goal !== undefined && (this.angle(p.face, p.goal) < 0.03 || Math.random() < 0.004)) {
+        const free = this.owner[p.face] < 0 || this.owner[p.face] === p.nation;
+        const own = this.villages.find((v) => v.nation === p.nation && this.angle(v.face, p.face) < VILLAGE_RANGE * 0.5);
+        if (own) p.village = own.id;
+        else if (free && (this.terrain[p.face] === T.Grass || this.terrain[p.face] === T.Forest || this.terrain[p.face] === T.Sand)) p.village = this.foundVillage(p.face, p.nation).id;
+        p.goal = undefined;
+      }
+      const march = target[p.nation];
+      const marching = march !== undefined && p.age > 16 && p.age < 50 && p.hunger > 0.4 && (p.id % 5 < 2);
       let next = p.face;
       let best = -Infinity;
       for (let k = 0; k < 3; k++) {
         const nb = this.neighbours[p.face * 3 + k];
         if (!walkable(this.terrain[nb] as T) || this.fire[nb] > 0) continue;
-        // Head home when too far away, otherwise wander towards food.
-        const roam = this.policy === "explore" ? 2 : 0.6;
-        const score = home && this.angle(p.face, home.face) > VILLAGE_RANGE * roam ? this.dot(nb, home.face) * 10 : this.food[nb] + Math.random() * 0.6;
+        const roam = pol === "explore" ? 2 : 0.6;
+        const score = p.goal !== undefined
+          ? this.dot(nb, p.goal) * 10 + Math.random() * 0.2
+          : marching
+          ? this.dot(nb, march) * 10 + Math.random() * 0.2
+          : home && this.angle(p.face, home.face) > VILLAGE_RANGE * roam
+            ? this.dot(nb, home.face) * 10
+            : this.food[nb] + Math.random() * 0.6;
         if (score > best) {
           best = score;
           next = nb;
@@ -454,36 +608,84 @@ export class PlanetSim {
       p.face = next;
 
       // Children: well-fed adults, a little more often in a village.
-      if (p.hunger > 0.55 && p.age > 16 && p.age < 45 && Math.random() < (home ? 0.09 : 0.05) * STEP_TIME * BIRTHS[this.policy] && this.people.length + born.length < MAX_PEOPLE) {
-        born.push({ id: this.nextId++, face: p.face, from: p.face, t: 0, hunger: 0.6, age: 0, village: p.village });
+      if (p.hunger > 0.55 && p.age > 16 && p.age < 45 && Math.random() < (home ? 0.09 : 0.05) * STEP_TIME * BIRTHS[pol] && this.people.length + born.length < MAX_PEOPLE) {
+        born.push({ id: this.nextId++, face: p.face, from: p.face, t: 0, hunger: 0.6, age: 0, village: p.village, nation: p.nation });
         p.hunger -= 0.2;
       }
 
-      // Settle: join a nearby village, or found one on good land.
-      if (!home && p.age > 14) {
-        const range = this.policy === "expand" ? VILLAGE_RANGE * 0.6 : VILLAGE_RANGE;
-        const near = this.villages.find((v) => this.angle(v.face, p.face) < range);
+      // Settle: join a nearby village of their own nation, or found one on good land
+      // that no other nation has claimed.
+      if (!home && p.age > 14 && p.goal === undefined) {
+        const range = pol === "expand" ? VILLAGE_RANGE * 0.6 : VILLAGE_RANGE;
+        const near = this.villages.find((v) => v.nation === p.nation && this.angle(v.face, p.face) < range);
+        const claimed = this.owner[p.face] >= 0 && this.owner[p.face] !== p.nation;
         if (near) p.village = near.id;
-        else if ((this.terrain[p.face] === T.Grass || this.terrain[p.face] === T.Forest) && Math.random() < (this.policy === "expand" ? 0.15 : 0.04)) {
-          const v = this.foundVillage(p.face);
+        else if (!claimed && (this.terrain[p.face] === T.Grass || this.terrain[p.face] === T.Forest) && Math.random() < (pol === "expand" ? 0.15 : 0.04)) {
+          const v = this.foundVillage(p.face, p.nation);
           p.village = v.id;
         }
       }
     }
-    const before = this.people.length;
-    this.people = this.people.filter((p) => p.hunger > 0 && p.age < 55 + (p.id % 25) + Math.min(20, this.resources.herbs / 20));
-    this.recentDeaths += before - this.people.length;
+    this.people = this.people.filter((p) => {
+      if (p.hunger > 0 && p.age < 55 + (p.id % 25) + Math.min(20, this.resources.herbs / 20)) return true;
+      if (p.hunger > -1) this.nations[p.nation].recentDeaths++; // war deaths were counted already
+      return false;
+    });
     this.people.push(...born);
   }
 
-  private foundVillage(face: number): Village {
-    const v: Village = { id: this.nextId++, face, name: `Village ${this.villages.length + 1}`, residents: 1, houses: 1 };
+  // Crowded villages send a few young adults off to found a new one on free land nearby.
+  // This is how nations spread, meet each other's borders, and start to trade or fight.
+  private sendPioneers(dt: number) {
+    for (const v of this.villages) {
+      const pol = this.nations[v.nation].policy;
+      if (v.residents < (pol === "expand" ? 10 : 18) || Math.random() > (pol === "expand" ? 0.12 : pol === "hoard" || pol === "settle" ? 0.02 : 0.05) * dt) continue;
+      let goal = -1, best = -Infinity;
+      for (const [f, w] of this.tilesNear(v.face, VILLAGE_RANGE * 2)) {
+        if (w > 0.45 || this.owner[f] >= 0 || (this.terrain[f] !== T.Grass && this.terrain[f] !== T.Forest)) continue;
+        const score = this.food[f] + this.moisture[f] + Math.random() * 0.5;
+        if (score > best) {
+          best = score;
+          goal = f;
+        }
+      }
+      if (goal < 0) continue;
+      const band = this.people.filter((p) => p.village === v.id && p.age > 16 && p.age < 35 && p.goal === undefined).slice(0, 4);
+      for (const p of band) {
+        p.village = null;
+        p.goal = goal;
+      }
+    }
+  }
+
+  // For each nation at war: the enemy village nearest its own land, to march on.
+  private warTargets(): Record<number, number> {
+    const out: Record<number, number> = {};
+    for (const nt of this.nations) {
+      const mine = this.villages.filter((v) => v.nation === nt.id);
+      if (!mine.length) continue;
+      let best = Infinity;
+      for (const v of this.villages) {
+        if (!this.atWar(nt.id, v.nation)) continue;
+        const d = Math.min(...mine.map((m) => this.angle(m.face, v.face)));
+        if (d < best) {
+          best = d;
+          out[nt.id] = v.face;
+        }
+      }
+    }
+    return out;
+  }
+
+  private foundVillage(face: number, nation: number): Village {
+    const count = this.villages.filter((v) => v.nation === nation).length + 1;
+    const v: Village = { id: this.nextId++, face, name: `${this.nationName(nation).replace(/^the /, "")} village ${count}`, residents: 1, houses: 1, nation };
     this.villages.push(v);
-    this.events.push({ kind: "village", detail: `A new village was founded (${this.villages.length} villages now).` });
+    this.events.push({ kind: "village", detail: `${this.nationName(nation)} founded a new village (${count} now).`, nation });
     return v;
   }
 
-  private stepVillages() {
+  private stepVillages(dt: number) {
     const counts = new Map<number, number>();
     for (const p of this.people) if (p.village !== null) counts.set(p.village, (counts.get(p.village) ?? 0) + 1);
     let farmsChanged = false;
@@ -496,7 +698,7 @@ export class PlanetSim {
       else if (v.houses > target && Math.random() < 0.01) v.houses--;
       // Farmland grows with the village: the home tile and rings around it.
       let ring = [v.face];
-      const rings = Math.min(3, Math.floor(v.houses / 3)) + (this.policy === "farm" ? 1 : 0);
+      const rings = Math.min(3, Math.floor(v.houses / 3)) + (this.nations[v.nation].policy === "farm" ? 1 : 0);
       for (let r = 0; r <= rings; r++) {
         const nextRing: number[] = [];
         for (const f of ring) {
@@ -507,25 +709,152 @@ export class PlanetSim {
       }
       return true;
     });
+    this.sendPioneers(dt);
     for (let f = 0; f < this.n && !farmsChanged; f++) if (farm[f] !== this.farm[f]) farmsChanged = true;
     if (farmsChanged) {
       this.farm = farm;
       this.version++;
     }
+    this.borderTimer -= dt;
+    if (this.borderTimer <= 0) {
+      this.borderTimer = 0.5;
+      this.updateBorders();
+      this.captureVillages();
+    }
+  }
+
+  // Each village claims the land around it (more as it grows). Where claims meet,
+  // the nearer village wins: a breadth-first flood from every village at once.
+  private updateBorders() {
+    const owner = new Int8Array(this.n).fill(-1);
+    const depth = new Int16Array(this.n);
+    const reach = new Int16Array(this.n);
+    const queue: number[] = [];
+    for (const v of this.villages) {
+      if (owner[v.face] >= 0) continue;
+      owner[v.face] = v.nation;
+      reach[v.face] = 3 + Math.min(5, Math.floor(v.houses / 2));
+      queue.push(v.face);
+    }
+    for (let i = 0; i < queue.length; i++) {
+      const f = queue[i];
+      if (depth[f] >= reach[f]) continue;
+      for (let k = 0; k < 3; k++) {
+        const nb = this.neighbours[f * 3 + k];
+        if (owner[nb] >= 0 || isWater(this.terrain[nb] as T)) continue;
+        owner[nb] = owner[f];
+        depth[nb] = depth[f] + 1;
+        reach[nb] = reach[f];
+        queue.push(nb);
+      }
+    }
+    // Count shared border between each pair of nations.
+    for (const row of this.contact) row.fill(0);
+    let changed = false;
+    for (let f = 0; f < this.n; f++) {
+      if (owner[f] !== this.owner[f]) changed = true;
+      const a = owner[f];
+      if (a < 0) continue;
+      for (let k = 0; k < 3; k++) {
+        const b = owner[this.neighbours[f * 3 + k]];
+        if (b >= 0 && b !== a) this.contact[a][b]++;
+      }
+    }
+    if (changed) {
+      this.owner = owner;
+      this.version++;
+    }
+  }
+
+  // At war, a village falls when the enemy around it clearly outnumbers its defenders.
+  private captureVillages() {
+    for (const v of this.villages) {
+      const near = this.people.filter((p) => p.age > 16 && this.angle(p.face, v.face) < 0.05);
+      const defenders = near.filter((p) => p.nation === v.nation).length;
+      const attackers = new Map<number, number>();
+      for (const p of near) if (this.atWar(p.nation, v.nation)) attackers.set(p.nation, (attackers.get(p.nation) ?? 0) + 1);
+      for (const [n, count] of attackers) {
+        if (count > defenders * 1.5 + 1) {
+          const from = v.nation;
+          v.nation = n;
+          this.nations[from].stability -= 10;
+          this.events.push({ kind: "captured", detail: `${this.nationName(n)} captured ${v.name} from ${this.nationName(from)}.`, nation: from, other: n });
+          v.name = `${v.name.replace(/ village \d+$/, "")} (taken by ${this.nationName(n)})`;
+          break;
+        }
+      }
+    }
+  }
+
+  // Relations drift with tension. Shared borders, hunger and expansion build it; trade,
+  // worship and the god's Peace power ease it. War burns itself out as people die.
+  private stepNations(dt: number) {
+    const k = this.nations.length;
+    for (let a = 0; a < k; a++) {
+      for (let b = a + 1; b < k; b++) {
+        const A = this.nations[a], B = this.nations[b];
+        if (!A.alive || !B.alive) continue;
+        const rel = this.relation[a][b];
+        const touching = this.contact[a][b] > 0;
+        let drift: number;
+        if (rel === "war") drift = -1; // war exhausts both sides
+        else {
+          // Tension drifts towards a level set by what is going on between them.
+          let level = 40 + 18 * Math.sin(this.year / 40 + a * 7.1 + b * 3.3); // old grudges come and go
+          if (touching) level += 12 + Math.min(25, this.contact[a][b] / 2);
+          for (const n of [A, B]) level += n.policy === "expand" ? 10 : n.policy === "rebel" ? 10 : n.policy === "worship" ? -8 : 0;
+          if (this.nationFood(a) < 40 || this.nationFood(b) < 40) level += 15;
+          // Envy: a much bigger neighbour makes the smaller one nervous.
+          const pa = this.people.filter((p) => p.nation === a).length, pb = this.people.filter((p) => p.nation === b).length;
+          if (Math.max(pa, pb) > 2 * Math.max(1, Math.min(pa, pb))) level += 8;
+          if (rel === "trade") level -= 10;
+          drift = (level - this.tension[a][b]) * 0.04;
+        }
+        this.sway(a, b, drift * dt);
+        const t = this.tension[a][b];
+        let next: Relation = rel;
+        if (rel === "peace" && t < 25) next = "trade"; // caravans travel even without a shared border
+        else if (rel === "peace" && t > 55) next = "rival";
+        else if (rel === "trade" && t > 45) next = "peace";
+        else if (rel === "rival" && t > 75) next = "war";
+        else if (rel === "rival" && t < 40) next = "peace";
+        else if (rel === "war" && t < 35) next = "peace";
+        if (next !== rel) {
+          this.relation[a][b] = this.relation[b][a] = next;
+          const words: Record<Relation, string> = {
+            trade: `${A.name} and ${B.name} began trading with each other.`,
+            peace: rel === "war" ? `${A.name} and ${B.name} made peace after their war.` : `${A.name} and ${B.name} are at peace.`,
+            rival: `${A.name} and ${B.name} have become rivals. Tension is rising on their border.`,
+            war: `${A.name} and ${B.name} have gone to war!`,
+          };
+          this.events.push({ kind: "diplomacy", detail: words[next], nation: a, other: b });
+        }
+      }
+    }
+    for (const nt of this.nations) {
+      if (!nt.alive) continue;
+      if (!this.people.some((p) => p.nation === nt.id) && !this.villages.some((v) => v.nation === nt.id)) {
+        nt.alive = false;
+        this.events.push({ kind: "fallen", detail: `${nt.name} is no more. Its last people are gone.`, nation: nt.id });
+      }
+    }
   }
 
   private stepNeeds(dt: number) {
-    const food = this.foodLevel();
-    const decay = this.policy === "worship" ? 0.15 : this.policy === "rebel" ? 1.5 : 0.5;
-    this.faith = Math.max(0, this.faith - decay * dt);
-    // Rebels burn the god's shrines now and then.
-    if (this.policy === "rebel" && this.villages.length && Math.random() < 0.03 * dt) {
-      const v = this.villages[Math.floor(Math.random() * this.villages.length)];
-      this.ignite(this.neighbours[v.face * 3]);
+    for (const nt of this.nations) {
+      if (!nt.alive) continue;
+      const food = this.nationFood(nt.id);
+      const decay = nt.policy === "worship" ? 0.15 : nt.policy === "rebel" ? 1.5 : 0.5;
+      nt.faith = Math.max(0, nt.faith - decay * dt);
+      // Rebels burn the god's shrines now and then.
+      const mine = this.villages.filter((v) => v.nation === nt.id);
+      if (nt.policy === "rebel" && mine.length && Math.random() < 0.03 * dt) this.ignite(this.neighbours[mine[Math.floor(Math.random() * mine.length)].face * 3]);
+      nt.recentDeaths *= Math.pow(0.85, dt); // fades over a few seconds
+      const wars = this.relation[nt.id].filter((r) => r === "war").length;
+      const target =
+        (nt.policy === "worship" ? 50 : 40) + Math.min(30, mine.length * 4) + (food - 50) * 0.4 - Math.min(40, nt.recentDeaths * 1.5) - wars * 15 + this.tradePartners(nt.id) * 5;
+      nt.stability = Math.max(0, Math.min(100, nt.stability + (target - nt.stability) * 0.15 * dt));
     }
-    this.recentDeaths *= Math.pow(0.85, dt); // fades over a few seconds
-    const target = (this.policy === "worship" ? 50 : 40) + Math.min(30, this.villages.length * 4) + (food - 50) * 0.4 - Math.min(40, this.recentDeaths * 1.5);
-    this.stability = Math.max(0, Math.min(100, this.stability + (target - this.stability) * 0.15 * dt));
   }
 
   // Random natural disasters, not caused by the god (though the people may blame them).
@@ -575,14 +904,19 @@ export class PlanetSim {
       this.killWhere((p) => this.angle(p.face, target) < 0.25 && Math.random() < 0.5 * (1 - medicine));
     }
     const dead = before - this.people.length;
-    this.stability -= 8;
+    const hit = this.nationsIn(this.tilesNear(target, 0.2).map(([f]) => f));
+    for (const id of hit) this.nations[id].stability -= 8;
     this.version++;
-    this.events.push({ kind: "disaster", detail: `A natural ${kind} struck${dead ? `, killing ${dead} people` : ""}. The god did not cause it.` });
+    this.events.push({ kind: "disaster", detail: `A natural ${kind} struck${dead ? `, killing ${dead} people` : ""}. The god did not cause it.`, nation: [...hit][0] });
   }
 
-  private foodLevel() {
-    if (!this.people.length) return 0;
-    return (this.people.reduce((s, p) => s + p.hunger, 0) / this.people.length) * 100;
+  private nationFood(id: number) {
+    let sum = 0, n = 0;
+    for (const p of this.people) if (p.nation === id) {
+      sum += p.hunger;
+      n++;
+    }
+    return n ? (sum / n) * 100 : 0;
   }
 
   private checkMilestones() {
@@ -600,17 +934,51 @@ export class PlanetSim {
 
   // ---- Read-outs for the UI and the narrator ----
 
-  needs(): Needs {
-    return { food: this.foodLevel(), faith: this.faith, stability: this.stability };
+  nationNeeds(id: number): Needs {
+    const nt = this.nations[id];
+    return { food: this.nationFood(id), faith: nt.faith, stability: nt.stability };
   }
 
-  crisis(): Crisis | null {
-    if (this.people.length < 10) return null;
-    const n = this.needs();
+  // The whole planet's needs: each nation's, weighted by its population.
+  needs(): Needs {
+    const out = { food: 0, faith: 0, stability: 0 };
+    const total = this.people.length;
+    if (!total) return out;
+    for (const nt of this.nations) {
+      const share = this.people.filter((p) => p.nation === nt.id).length / total;
+      if (!share) continue;
+      const n = this.nationNeeds(nt.id);
+      out.food += n.food * share;
+      out.faith += n.faith * share;
+      out.stability += n.stability * share;
+    }
+    return out;
+  }
+
+  crisis(id: number): Crisis | null {
+    if (this.people.filter((p) => p.nation === id).length < 8) return null;
+    const n = this.nationNeeds(id);
     if (n.food < 30) return "famine";
     if (n.stability < 20) return "revolution";
     if (n.faith < 5) return "cult";
     return null;
+  }
+
+  nationInfo(): NationInfo[] {
+    return this.nations.map((nt) => ({
+      id: nt.id,
+      name: nt.name,
+      color: nt.color,
+      alive: nt.alive,
+      policy: nt.policy,
+      population: this.people.filter((p) => p.nation === nt.id).length,
+      villages: this.villages.filter((v) => v.nation === nt.id).length,
+      needs: this.nationNeeds(nt.id),
+      crisis: this.crisis(nt.id),
+      relations: this.nations
+        .filter((o) => o.id !== nt.id && o.alive)
+        .map((o) => ({ id: o.id, relation: this.relation[nt.id][o.id], tension: Math.round(this.tension[nt.id][o.id]) })),
+    }));
   }
 
   stats(): PlanetStats {
