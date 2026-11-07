@@ -99,6 +99,8 @@ const FATE_ICONS: Record<GodPower, string> = {
 };
 // A tsunami ring spreading from `face`; a meteor falling towards `face`; an erupting volcano at `face`.
 export type Wave = { id: number; face: number; at: number; r: number };
+// A warship: sails from tile to tile across the sea (`from` -> `face`, `t` along the way).
+export type Ship = { id: number; nation: number; face: number; from: number; t: number; path: number[]; hp: number; cooldown: number; replan: number };
 // A drought's heat haze over `face`, for the globe to draw while it lasts.
 export type Drought = { id: number; face: number; at: number; r: number; life: number };
 export type Meteor = { id: number; face: number; at: number; radius: number; fall: number; natural: boolean };
@@ -110,6 +112,8 @@ export type Alert = { icon: string; title: string; text: string; at: number; fac
 // The sim runs in fast ticks (one per real second); a calendar year is this many of them.
 export const SECONDS_PER_YEAR = 25;
 export const MIN_NATIONS = 3;
+const NAVY_ERA = 2; // ships from the Iron Age
+const MAX_SHIPS = 6; // per nation
 // How much each resource counts towards the planet's output score.
 const VALUE: Resources = { food: 1, wood: 1, stone: 2, metal: 3, gold: 5, herbs: 3 };
 const DISASTER_EVERY = 50; // seconds between natural disasters
@@ -592,6 +596,7 @@ export class PlanetSim {
     this.stepVillages(dt);
     this.stepNations(dt);
     this.stepNationLife(dt);
+    this.stepNavy(dt);
     this.stepNeeds(dt);
     this.stepWeather(dt);
     this.stepCatastrophes(dt);
@@ -987,6 +992,103 @@ export class PlanetSim {
     return this.year / SECONDS_PER_YEAR;
   }
 
+  // ---- Navies: from the Iron Age, coastal towns build warships that patrol, fight enemy fleets and shell enemy coasts ----
+
+  ships: Ship[] = [];
+  private navyTimer = 3;
+
+  navySize(id: number) {
+    return this.ships.filter((s) => s.nation === id).length;
+  }
+
+  // A sea tile next to a settlement, if it is on the coast.
+  private harbour(face: number) {
+    let best = -1, bd = -2;
+    for (const [f] of this.tilesNear(face, 0.07)) if (isWater(this.terrain[f] as T) && this.dot(face, f) > bd) [best, bd] = [f, this.dot(face, f)];
+    return best;
+  }
+
+  // Plan a route by sea (breadth-first over water tiles): to the nearest enemy fleet or enemy coast
+  // if at war, otherwise a patrol to some reachable stretch of sea.
+  private planRoute(sh: Ship) {
+    const foes = this.ships.filter((o) => this.atWar(o.nation, sh.nation)).map((o) => o.face);
+    const towns = this.villages.filter((v) => this.atWar(v.nation, sh.nation)).map((v) => v.face);
+    const parent = new Int32Array(this.n).fill(-2);
+    parent[sh.face] = -1;
+    const order = [sh.face];
+    let found = -1;
+    for (let i = 0; i < order.length && order.length < 9000 && found < 0; i++) {
+      const f = order[i];
+      if (i > 0 && (foes.some((g) => this.angle(g, f) < 0.03) || towns.some((g) => this.angle(g, f) < 0.06))) found = f;
+      for (let k = 0; k < 3; k++) {
+        const nb = this.neighbours[f * 3 + k];
+        if (parent[nb] !== -2 || !isWater(this.terrain[nb] as T)) continue;
+        parent[nb] = f;
+        order.push(nb);
+      }
+    }
+    if (found < 0) found = order[Math.min(order.length - 1, 10 + Math.floor(Math.random() * 60))]; // patrol
+    const path: number[] = [];
+    for (let f = found; f !== sh.face && f >= 0; f = parent[f]) path.push(f);
+    sh.path = path.reverse();
+    sh.replan = foes.length || towns.length ? 8 : 30;
+  }
+
+  private stepNavy(dt: number) {
+    // Shipyards: every few seconds, each nation that has reached the Iron Age may launch a ship.
+    this.navyTimer -= dt;
+    if (this.navyTimer <= 0) {
+      this.navyTimer = 6;
+      for (const nt of this.nations) {
+        if (!nt.alive || eraOf(nt.tech) < NAVY_ERA) continue;
+        const mine = this.villages.filter((v) => v.nation === nt.id);
+        const limit = Math.min(MAX_SHIPS, mine.reduce((t, v) => t + (v.tier === 2 ? 2 : v.tier === 1 ? 1 : 0), 1));
+        if (this.navySize(nt.id) >= limit || Math.random() > 0.35) continue;
+        const port = mine.sort((a, b) => b.tier - a.tier).map((v) => this.harbour(v.face)).find((h) => h >= 0);
+        if (port == null) continue;
+        const first = this.navySize(nt.id) === 0;
+        const sh: Ship = { id: this.nextId++, nation: nt.id, face: port, from: port, t: 1, path: [], hp: 3, cooldown: 0, replan: 0 };
+        this.ships.push(sh);
+        if (first) {
+          const text = `${cap(nt.name)} launched their first warship. They now have a navy.`;
+          this.announce("⚓", "A navy is born", text, port, true);
+          this.events.push({ kind: "milestone", detail: text, nation: nt.id });
+        }
+      }
+    }
+    for (const sh of this.ships) {
+      // Sail along the planned route, one sea tile at a time; replan now and then (enemies move).
+      sh.replan -= dt;
+      sh.t += dt * 1.6;
+      if (sh.t >= 1) {
+        if (!sh.path.length || sh.replan <= 0) this.planRoute(sh);
+        const next = sh.path.shift();
+        sh.from = sh.face;
+        sh.t = next == null ? 1 : 0;
+        if (next != null) sh.face = next;
+      }
+      // Fight: fire on enemy ships in range, or shell an enemy coastal settlement.
+      sh.cooldown -= dt;
+      if (sh.cooldown > 0) continue;
+      const foe = this.ships.find((o) => o.hp > 0 && this.atWar(o.nation, sh.nation) && this.angle(o.face, sh.face) < 0.05);
+      if (foe) {
+        sh.cooldown = 1.5;
+        if (Math.random() < 0.5) foe.hp--;
+        if (foe.hp <= 0) this.events.push({ kind: "disaster", detail: `A warship of ${this.nationName(foe.nation)} was sunk by ${this.nationName(sh.nation)}.`, nation: foe.nation, other: sh.nation });
+        continue;
+      }
+      const town = this.villages.find((v) => this.atWar(v.nation, sh.nation) && this.angle(v.face, sh.face) < 0.07);
+      if (town) {
+        sh.cooldown = 3;
+        const killed = this.killWhere((p) => p.nation === town.nation && this.angle(p.face, town.face) < 0.04 && Math.random() < 0.15);
+        this.nations[town.nation].stability -= 1;
+        if (killed) this.events.push({ kind: "disaster", detail: `Warships of ${this.nationName(sh.nation)} shelled ${town.name}, killing ${killed}.`, nation: town.nation, other: sh.nation });
+      }
+    }
+    // Sunk ships, and fleets of nations that have fallen, leave the sea.
+    this.ships = this.ships.filter((sh) => sh.hp > 0 && this.nations[sh.nation]?.alive);
+  }
+
   // ---- Continents: every big landmass gets a name (worked out once, from the starting map) ----
 
   private _continents: { name: string; face: number; size: number }[] | null = null;
@@ -1058,6 +1160,7 @@ export class PlanetSim {
 
   private nationTimer = 1;
   private lastSplit = -99;
+  private revolt = new Map<number, number>(); // when each nation's revolution began
   private conqueror = new Map<number, number>(); // who last took a settlement from each nation
 
   private stepNationLife(dt: number) {
@@ -1065,6 +1168,27 @@ export class PlanetSim {
     if (this.nationTimer > 0) return;
     this.nationTimer = 1;
     const alive = () => this.nations.filter((n) => n.alive);
+
+    // Revolution: if it drags on, the people storm the palace and a new ruler takes over.
+    for (const nt of alive()) {
+      if (this.crisis(nt.id) !== "revolution") {
+        this.revolt.delete(nt.id);
+        continue;
+      }
+      const since = this.revolt.get(nt.id) ?? this.year;
+      this.revolt.set(nt.id, since);
+      if (this.year - since < 15 || Math.random() > 0.15) continue;
+      const old = `${nt.leader.title} ${nt.leader.name}`;
+      nt.leader = makeLeader(RACE[nt.race]);
+      nt.stability = 45; // a fresh start, for now
+      nt.policy = "settle";
+      this.revolt.delete(nt.id);
+      const dead = this.killWhere((p) => p.nation === nt.id && Math.random() < 0.08); // the uprising costs lives
+      const home = this.capital(nt.id)?.face ?? this.villages.find((v) => v.nation === nt.id)?.face ?? 0;
+      const text = `The people of ${nt.name} overthrew ${old}. ${nt.leader.title} ${nt.leader.name} now rules${dead ? `; ${dead} died in the uprising` : ""}.`;
+      this.announce("👑", "Leader overthrown!", text, home);
+      this.events.push({ kind: "revolution", detail: text, nation: nt.id });
+    }
 
     // A beaten nation with no settlements left is wiped out: its stragglers join the victor.
     for (const nt of alive()) {
@@ -1682,6 +1806,7 @@ export class PlanetSim {
       capital: this.capital(nt.id)?.name,
       race: nt.race,
       tech: Math.round(nt.tech),
+      ships: this.navySize(nt.id),
       era: eraOf(nt.tech),
       leader: nt.leader,
       needs: this.nationNeeds(nt.id),

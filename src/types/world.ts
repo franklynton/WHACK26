@@ -97,6 +97,7 @@ export interface NationInfo {
   capital?: string;
   race: RaceId; // see src/sim/races.ts
   tech: number; // progress towards space
+  ships?: number; // warships in its navy (from the Iron Age)
   era: number; // index into ERAS (0 = Stone Age, 4 = Space Age)
   leader: Leader;
   needs: Needs;
