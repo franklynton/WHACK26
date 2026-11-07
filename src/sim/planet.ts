@@ -93,7 +93,7 @@ export type Weather = {
   id: number; face: number; pos: [number, number, number]; axis: [number, number, number]; storm: boolean;
   speed: number; age: number; life: number; rainTimer: number; nextStrike: number; flash: { face: number; at: number } | null;
 };
-const MAX_WEATHER = 8;
+const MAX_WEATHER = 16; // keep in step with MAX_WX in Globe.tsx
 const cap = (t: string) => t[0].toUpperCase() + t.slice(1);
 const FATE_TITLES: Record<GodPower, string> = {
   spawn: "Strangers", raise: "The earth rises", lower: "The sea rises", forest: "A new forest", rain: "Rain", drought: "Drought",
@@ -1825,7 +1825,7 @@ export class PlanetSim {
     if (this.nextFate > 0 || !this.people.length) return;
     this.nextFate = 40 + Math.random() * 30;
     const bag: [GodPower, number][] = [
-      ["rain", 3], ["forest", 2], ["miracle", 2], ["peace", 2], ["drought", 2], ["discord", 2],
+      ["rain", 5], ["forest", 2], ["miracle", 2], ["peace", 2], ["drought", 2], ["discord", 2],
       ["raise", 1], ["lower", 1], ["fire", 1],
     ];
     let r = Math.random() * bag.reduce((t, [, w]) => t + w, 0);
@@ -2019,7 +2019,7 @@ export class PlanetSim {
   private stepWeather(dt: number) {
     this.nextWeather -= dt;
     if (this.nextWeather <= 0) {
-      this.nextWeather = 3 + Math.random() * 6;
+      this.nextWeather = 1.5 + Math.random() * 3; // a new cloud every few seconds
       const nearPeople = this.people.length && Math.random() < 0.6;
       const face = nearPeople ? this.people[Math.floor(Math.random() * this.people.length)].face : Math.floor(Math.random() * this.n);
       this.addWeather(face, Math.random() < 0.12);
