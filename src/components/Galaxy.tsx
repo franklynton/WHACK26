@@ -255,6 +255,9 @@ export default function Galaxy({
       const history = (data.history ?? []) as MarketPricePoint[];
       setMarketHistory(history);
       setSimulatedHistory((current) => current.length === 0 ? history : current);
+      // Credits live only in the database. Resources reach the game through the sync (migration 008),
+      // so the market never overwrites what the planet has produced since.
+      const me = data.me as { credits?: number } | null;
       if (me?.credits != null) {
         setCredits(Number(me.credits));
         sim.marketCredits = Math.max(0, Math.floor(Number(me.credits)));
@@ -385,6 +388,7 @@ export default function Galaxy({
     setMessage(data.error || `Order ${data.status ?? "placed"}${data.remaining != null ? ` (${data.remaining} remaining)` : ""}`);
     await sync(); // brings the held goods and any fill into the game
     if (!data.error) setMarketOrderPanel(null);
+    await sync(); // brings the held goods and any fill into the game
     await loadMarket();
   };
 
