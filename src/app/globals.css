@@ -103,3 +103,15 @@ body {
   backdrop-filter: blur(4px);
   transition: opacity 0.2s;
 }
+
+/* Continent names, written across the land like on a map. */
+.continent-label {
+  white-space: nowrap;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.35em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.92);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.75);
+  transition: opacity 0.2s;
+}

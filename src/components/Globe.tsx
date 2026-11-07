@@ -260,26 +260,27 @@ function Ocean() {
   );
 }
 
-// Puffy low-poly clouds drifting slowly around the planet.
-const CLOUDS = 46;
+// Fair-weather clouds: the same puffy cluster as rain clouds, but white and see-through, drifting slowly.
+const CLOUDS = 40;
 function Clouds() {
   const group = useRef<THREE.Group>(null);
   const ref = useRef<THREE.InstancedMesh>(null);
-  const PUFFS = 5;
   useEffect(() => {
     const mesh = ref.current;
     if (!mesh) return;
-    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), s = new THREE.Vector3(), dir = new THREE.Vector3(), side = new THREE.Vector3();
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), s = new THREE.Vector3(), n = new THREE.Vector3(), x = new THREE.Vector3(), z = new THREE.Vector3(), spin = new THREE.Quaternion();
     let i = 0;
     for (let c = 0; c < CLOUDS; c++) {
-      dir.randomDirection();
-      side.randomDirection().cross(dir).normalize();
-      for (let k = 0; k < PUFFS; k++) {
-        p.copy(dir).addScaledVector(side, (k - PUFFS / 2) * 0.018).normalize().multiplyScalar(1.13 + Math.random() * 0.01);
-        const r = 0.012 + Math.random() * 0.014 * (1 - Math.abs(k - PUFFS / 2) / PUFFS);
-        s.set(r, r * 0.7, r);
-        q.setFromUnitVectors(new THREE.Vector3(0, 1, 0), p.clone().normalize());
-        m.compose(p, q, s);
+      n.randomDirection();
+      // Random twist about the vertical so the clouds don't all face the same way.
+      q.setFromUnitVectors(UP, n).multiply(spin.setFromAxisAngle(UP, Math.random() * Math.PI * 2));
+      x.set(1, 0, 0).applyQuaternion(q);
+      z.set(0, 0, 1).applyQuaternion(q);
+      const size = 0.8 + Math.random() * 0.4;
+      for (const [ox, oy, oz, r] of PUFF_OFFSETS) {
+        p.copy(n).multiplyScalar(1.12 + oy).addScaledVector(x, ox * size).addScaledVector(z, oz * size);
+        const rr = r * size;
+        m.compose(p, q, s.set(rr, rr * 0.65, rr));
         mesh.setMatrixAt(i++, m);
       }
     }
@@ -290,9 +291,9 @@ function Clouds() {
   });
   return (
     <group ref={group}>
-      <instancedMesh ref={ref} args={[undefined, undefined, CLOUDS * PUFFS]} frustumCulled={false}>
+      <instancedMesh ref={ref} args={[undefined, undefined, CLOUDS * WX_PUFFS]} frustumCulled={false}>
         <icosahedronGeometry args={[1, 1]} />
-        <meshStandardMaterial color="#ffffff" flatShading transparent opacity={0.7} roughness={1} depthWrite={false} />
+        <meshStandardMaterial color="#ffffff" flatShading transparent opacity={0.38} roughness={1} depthWrite={false} />
       </instancedMesh>
     </group>
   );
@@ -355,7 +356,7 @@ function People({ sim }: { sim: PlanetSim }) {
   const up = useMemo(() => new THREE.Vector3(0, 1, 0), []);
   const q = useMemo(() => new THREE.Quaternion(), []);
   const s = useMemo(() => new THREE.Vector3(1, 1, 1), []);
-  const cols = useMemo(() => sim.nations.map((n) => new THREE.Color(n.color).lerp(WHITE, 0.25)), [sim]);
+  const cols = useMemo(() => sim.nations.map((n) => new THREE.Color(n.color).lerp(WHITE, 0.25)), [sim, sim.nations.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useFrame(() => {
     const mesh = ref.current;
@@ -410,7 +411,7 @@ function Houses({ sim }: { sim: PlanetSim }) {
   const up = useMemo(() => new THREE.Vector3(0, 1, 0), []);
   const q = useMemo(() => new THREE.Quaternion(), []);
   const s = useMemo(() => new THREE.Vector3(1, 1, 1), []);
-  const cols = useMemo(() => sim.nations.map((n) => new THREE.Color(n.color).multiplyScalar(0.8)), [sim]);
+  const cols = useMemo(() => sim.nations.map((n) => new THREE.Color(n.color).multiplyScalar(0.8)), [sim, sim.nations.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useFrame(() => {
     const mesh = ref.current;
@@ -494,7 +495,7 @@ function Landmarks({ sim }: { sim: PlanetSim }) {
     g.rotateY(Math.PI / 4);
     return g;
   }), []);
-  const cols = useMemo(() => sim.nations.map((n) => new THREE.Color(n.color).multiplyScalar(0.8)), [sim]);
+  const cols = useMemo(() => sim.nations.map((n) => new THREE.Color(n.color).multiplyScalar(0.8)), [sim, sim.nations.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const tmp = useMemo(() => ({ m: new THREE.Matrix4(), c: new THREE.Vector3(), p: new THREE.Vector3(), n: new THREE.Vector3(), t1: new THREE.Vector3(), t2: new THREE.Vector3(), q: new THREE.Quaternion(), one: new THREE.Vector3(1, 1, 1) }), []);
   useFrame(() => {
     const { m, c, p, n, t1, t2, q, one } = tmp;
@@ -643,6 +644,36 @@ function Cities({ sim }: { sim: PlanetSim }) {
   );
 }
 
+// Big landmasses carry their names, written across the land like a map; they fade on the far side.
+function ContinentLabels({ sim }: { sim: PlanetSim }) {
+  const camera = useThree((s) => s.camera);
+  const list = useMemo(() => sim.continents(), [sim]);
+  const refs = useRef<(HTMLDivElement | null)[]>([]);
+  const cam = useMemo(() => new THREE.Vector3(), []);
+  useFrame(() => {
+    cam.copy(camera.position).normalize();
+    const far = camera.position.length();
+    list.forEach((c, k) => {
+      const el = refs.current[k];
+      if (!el) return;
+      const d = sim.centroids[c.face * 3] * cam.x + sim.centroids[c.face * 3 + 1] * cam.y + sim.centroids[c.face * 3 + 2] * cam.z;
+      // Shown when facing you, and only from a distance (they'd crowd the villages up close).
+      el.style.opacity = String(Math.max(0, Math.min(1, (d - 0.3) * 2.5)) * Math.max(0, Math.min(1, (far - 1.7) * 2)) * 0.85);
+    });
+  });
+  return (
+    <>
+      {list.map((c, k) => (
+        <Html key={c.name} position={surface(sim, c.face, new THREE.Vector3()).multiplyScalar(1.02)} center zIndexRange={[5, 0]} style={{ pointerEvents: "none" }}>
+          <div ref={(el) => { refs.current[k] = el; }} className="continent-label">
+            {c.name}
+          </div>
+        </Html>
+      ))}
+    </>
+  );
+}
+
 // Start with the camera looking at where the people are.
 function FaceStart({ sim }: { sim: PlanetSim }) {
   const camera = useThree((s) => s.camera);
@@ -743,9 +774,10 @@ function Weather({ sim }: { sim: PlanetSim }) {
       const life = Math.min(1, w.age / 1.5, (w.life - w.age) / 1.5);
       const flashing = w.flash && sim.year - w.flash.at < 0.25;
       c.set(w.storm ? (flashing ? "#c9d4ff" : "#3a3f4d") : "#6f7889");
+      const spread = w.storm ? 1.9 : 1, grow = w.storm ? 1.7 : 1; // storms are much bigger than rain clouds
       for (const [ox, oy, oz, r] of PUFF_OFFSETS) {
-        p.copy(n).multiplyScalar(1.1 + oy).addScaledVector(x, ox * (w.storm ? 1.4 : 1)).addScaledVector(z, oz * (w.storm ? 1.4 : 1));
-        const rr = r * life * (w.storm ? 1.35 : 1);
+        p.copy(n).multiplyScalar(1.1 + oy).addScaledVector(x, ox * spread).addScaledVector(z, oz * spread);
+        const rr = r * life * grow;
         m.compose(p, q, s.set(rr, rr * 0.65, rr));
         mesh.setMatrixAt(i, m);
         mesh.setColorAt(i++, c);
@@ -754,7 +786,7 @@ function Weather({ sim }: { sim: PlanetSim }) {
       for (const [ox, oz, ph] of DROP_OFFSETS) {
         const f = (ph + t * (w.storm ? 1.6 : 1.1)) % 1;
         const h = 1.095 - f * 0.085;
-        a.copy(n).multiplyScalar(h).addScaledVector(x, ox * (w.storm ? 1.4 : 1)).addScaledVector(z, oz * (w.storm ? 1.4 : 1));
+        a.copy(n).multiplyScalar(h).addScaledVector(x, ox * spread).addScaledVector(z, oz * spread);
         b.copy(a).addScaledVector(n, -0.012);
         const o = d * 6;
         if (life < 0.3) a.copy(b); // no rain while forming
@@ -809,15 +841,16 @@ function Weather({ sim }: { sim: PlanetSim }) {
 }
 
 // Tsunami rings, falling meteors with a fiery trail, and smoke rising from volcanoes.
-const MAX_WAVES = 4, MAX_METEORS = 4, MAX_VOLCANOES = 4, SMOKE = 14;
+const MAX_WAVES = 4, MAX_METEORS = 4, MAX_VOLCANOES = 8, SMOKE = 14;
 function Catastrophes({ sim }: { sim: PlanetSim }) {
   const waves = useRef<(THREE.Mesh | null)[]>([]);
   const rocks = useRef<(THREE.Group | null)[]>([]);
   const smoke = useRef<THREE.InstancedMesh>(null);
+  const cones = useRef<THREE.InstancedMesh>(null);
   const glow = useRef<(THREE.PointLight | null)[]>([]);
-  const tmp = useMemo(() => ({ n: new THREE.Vector3(), q: new THREE.Quaternion(), m: new THREE.Matrix4(), p: new THREE.Vector3(), s: new THREE.Vector3(), side: new THREE.Vector3() }), []);
+  const tmp = useMemo(() => ({ n: new THREE.Vector3(), q: new THREE.Quaternion(), m: new THREE.Matrix4(), p: new THREE.Vector3(), s: new THREE.Vector3(), side: new THREE.Vector3(), cone: new THREE.Color() }), []);
   useFrame(({ clock }) => {
-    const { n, q, m, p, s, side } = tmp;
+    const { n, q, m, p, s, side, cone } = tmp;
     // Tsunami: a flat ring hugging the sea, whose radius is the wave front.
     waves.current.forEach((mesh, i) => {
       const w = sim.waves[i];
@@ -847,9 +880,9 @@ function Catastrophes({ sim }: { sim: PlanetSim }) {
       const scale = 0.7 + 0.5 * k;
       g.scale.setScalar(scale);
     });
-    // Volcano smoke: dark puffs rising and spreading from the crater.
-    const sm = smoke.current;
-    if (sm) {
+    // Every volcano keeps its cone (glowing red while live); smoke and glow only while erupting.
+    const sm = smoke.current, cn = cones.current;
+    if (sm && cn) {
       let i = 0;
       const t = clock.elapsedTime;
       sim.volcanoes.slice(0, MAX_VOLCANOES).forEach((v, vi) => {
@@ -857,7 +890,15 @@ function Catastrophes({ sim }: { sim: PlanetSim }) {
         n.copy(p).normalize();
         q.setFromUnitVectors(UP, n);
         side.set(1, 0, 0).applyQuaternion(q);
-        const fade = Math.min(1, (v.life - (sim.year - v.at)) / 3);
+        m.compose(n.clone().multiplyScalar(p.length() + 0.01), q, s.set(1, 1, 1));
+        cn.setMatrixAt(vi, m);
+        cn.setColorAt(vi, cone.set(v.active ? "#a8321a" : "#4a3f3a"));
+        const l = glow.current[vi];
+        if (!v.active) {
+          if (l) l.intensity = 0;
+          return;
+        }
+        const fade = Math.min(1, (v.life - (sim.year - v.at)) / 3, (sim.year - v.at) / 1);
         for (let j = 0; j < SMOKE; j++) {
           const f = (j / SMOKE + t * 0.25) % 1;
           const r = (0.008 + f * 0.022) * fade;
@@ -865,7 +906,6 @@ function Catastrophes({ sim }: { sim: PlanetSim }) {
           m.compose(pos, q, s.set(r, r, r));
           sm.setMatrixAt(i++, m);
         }
-        const l = glow.current[vi];
         if (l) {
           l.position.copy(p).multiplyScalar(1.02);
           l.intensity = (1.2 + Math.sin(t * 9) * 0.4) * fade;
@@ -874,6 +914,9 @@ function Catastrophes({ sim }: { sim: PlanetSim }) {
       for (let vi = sim.volcanoes.length; vi < MAX_VOLCANOES; vi++) if (glow.current[vi]) glow.current[vi]!.intensity = 0;
       sm.count = i;
       sm.instanceMatrix.needsUpdate = true;
+      cn.count = Math.min(sim.volcanoes.length, MAX_VOLCANOES);
+      cn.instanceMatrix.needsUpdate = true;
+      if (cn.instanceColor) cn.instanceColor.needsUpdate = true;
     }
   });
   return (
@@ -897,6 +940,11 @@ function Catastrophes({ sim }: { sim: PlanetSim }) {
           </mesh>
         </group>
       ))}
+      {/* Volcano cones, sitting on the peak with the tip pointing out. */}
+      <instancedMesh ref={cones} args={[undefined, undefined, MAX_VOLCANOES]} frustumCulled={false}>
+        <coneGeometry args={[0.022, 0.03, 9, 1, true]} />
+        <meshStandardMaterial flatShading roughness={1} side={THREE.DoubleSide} />
+      </instancedMesh>
       <instancedMesh ref={smoke} args={[undefined, undefined, MAX_VOLCANOES * SMOKE]} frustumCulled={false}>
         <icosahedronGeometry args={[1, 1]} />
         <meshStandardMaterial color="#3b3533" flatShading transparent opacity={0.85} roughness={1} />
@@ -932,6 +980,7 @@ export default function Globe({ sim, tool, speed, onPaint, onHover, focus }: { s
       <Houses sim={sim} />
       <Landmarks sim={sim} />
       <Cities sim={sim} />
+      <ContinentLabels sim={sim} />
       <Trees sim={sim} />
       <Ocean />
       <Clouds />
