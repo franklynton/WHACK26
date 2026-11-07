@@ -1,5 +1,5 @@
 "use client";
-// The front page: what Petri is, how to play, and a button to create your planet.
+// The front page: what Arda is, how to play, and a button to create your planet.
 import { useState } from "react";
 
 const STEPS = [
@@ -9,7 +9,7 @@ const STEPS = [
   { icon: "💬", title: "Talk to them", text: "Your people share one mind, powered by AI. They pray, plead and argue with you, and decide what to do next." },
 ];
 
-const NAME_KEY = "petri-player-name";
+const NAME_KEY = "arda-player-name";
 
 function savedName() {
   try {
@@ -36,7 +36,7 @@ export default function Landing({ onStart }: { onStart: (playerName: string) => 
       <div className="planet-orb" aria-hidden />
       <section className="relative mx-auto flex max-w-5xl flex-col items-center px-6 pt-24 text-center">
         <p className="label mb-4">A god game for one tiny world</p>
-        <h1 className="text-7xl font-bold tracking-tight sm:text-8xl">Petri</h1>
+        <h1 className="text-7xl font-bold tracking-tight sm:text-8xl">Arda</h1>
         <p className="mt-5 max-w-xl text-lg text-white/70">
           You are given a pocket-sized planet and the little people who live on it. They will worship you, fear you, or decide you are evil. It depends on what kind of god you are.
         </p>

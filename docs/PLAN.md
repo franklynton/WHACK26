@@ -1,4 +1,4 @@
-# Petri: team plan
+# Arda: team plan
 
 WHACK26 runs from Saturday 7 Nov, about 11:30, to Sunday 8 Nov, about 11:00 (UK time). This page says what we're building, who does what, and how we work. Each track also has a GitHub issue with a checklist.
 

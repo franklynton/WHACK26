@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 ## Project
-WHACK26 hackathon, 23.5 hours, team of 4. **Petri**: a god game on your own 3D planet, in the WorldBox genre (our own take, not a copy). Tiny people wander, farm and build villages on a detailed globe. They share one collective mind, powered by an LLM: once they settle they invent a name, language and a religion about you (their god), talk to you, and decide what to focus on (settle, expand, farm, worship, explore, hoard, or rebel), which changes how they behave. Needs decay (food, faith, stability). Neglect brings famine, revolution, or a cult that decides you're evil.
+WHACK26 hackathon, 23.5 hours, team of 4. **Arda**: a god game on your own 3D planet, in the WorldBox genre (our own take, not a copy). Tiny people wander, farm and build villages on a detailed globe. They share one collective mind, powered by an LLM: once they settle they invent a name, language and a religion about you (their god), talk to you, and decide what to focus on (settle, expand, farm, worship, explore, hoard, or rebel), which changes how they behave. Needs decay (food, faith, stability). Neglect brings famine, revolution, or a cult that decides you're evil.
 **Goal loop:** keep your people (later: several nations per planet) at peace so the planet produces the most resources. Planets roll a type (Verdant, Timberworld, Ironworld, Gilded, Archipelago), so each is rich in different resources (food, wood, stone, metal, gold, medicinal herbs).
 **Later:** nations within a planet, each with its own mind, trading or fighting; a Supabase database for each planet's state; multiplayer planets in a shared universe to trade with, start trade wars with, or invade.
 Optimise for a working, impressive live demo over completeness.
