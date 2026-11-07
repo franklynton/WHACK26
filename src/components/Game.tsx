@@ -5,7 +5,7 @@
 // (src/sim/planet.ts) to the LLM routes (/api/narrate, /api/mind).
 import { useCallback, useEffect, useRef, useState } from "react";
 import Globe from "./Globe";
-import Galaxy from "./Galaxy";
+import Galaxy, { type GalaxyStatus } from "./Galaxy";
 import LeaderDialog from "./LeaderDialog";
 import Portrait, { type Mood } from "./Portrait";
 import { ERAS, RACE, type RaceId } from "@/sim/races";
@@ -95,6 +95,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
   const [miracle, setMiracle] = useState<MiracleId | null>(null); // picked from the bar; click the land to cast
   const [seenOutcome, setSeenOutcome] = useState(false);
   const [galaxy, setGalaxy] = useState(false);
+  const [link, setLink] = useState<GalaxyStatus>({ enabled: null, galaxy: null, members: 0 }); // the galaxy connection, for the HUD
   useEffect(() => {
     const esc = (e: KeyboardEvent) => e.key === "Escape" && setMiracle(null);
     window.addEventListener("keydown", esc);
@@ -503,12 +504,19 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
           )}
           <button
             onClick={() => setGalaxy(true)}
-            disabled={!hud.god.spacefaring}
-            className={`rounded-lg px-2.5 py-1 text-sm transition ${hud.god.spacefaring ? "bg-indigo-400/25 font-semibold hover:bg-indigo-400/40" : "bg-white/5 opacity-50"}`}
-            title={hud.god.spacefaring ? "Travel to other players' planets" : `Locked: your nation must reach the Space Age (now in the ${ERAS[hud.nations[0]?.era ?? 0]})`}
+            className={`rounded-lg px-2.5 py-1 text-sm transition ${hud.god.spacefaring ? "bg-indigo-400/25 font-semibold hover:bg-indigo-400/40" : "bg-white/5 hover:bg-white/10"}`}
+            title={hud.god.spacefaring ? "Trade with or invade the planets in your galaxy" : `Join or leave a galaxy. Trading and invading unlock at the Space Age (your nation is in the ${ERAS[hud.nations[0]?.era ?? 0]})`}
           >
-            {hud.god.spacefaring ? "🌌 Galaxy" : "🔒 Galaxy"}
+            🌌 Galaxy
           </button>
+          {/* Connection pill: green with how full your galaxy is, "solo" when you're in none, grey when offline */}
+          <span
+            className={`flex shrink-0 items-center gap-1 self-center whitespace-nowrap rounded-full px-1.5 py-0.5 text-[11px] tabular-nums ${link.enabled && link.members ? "bg-emerald-400/15 text-emerald-200" : "bg-white/5 text-white/40"}`}
+            title={!link.enabled ? "Galaxy offline" : link.galaxy ? `In galaxy ${link.galaxy}: ${link.members}/5 gods` : link.members ? `${link.members} gods online` : "Not in a galaxy"}
+          >
+            <span className={`h-1.5 w-1.5 rounded-full ${link.enabled ? (link.members ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]" : "bg-white/50") : "bg-white/30"}`} />
+            {!link.enabled ? "off" : link.galaxy ? `${link.members}/5` : link.members ? link.members : "solo"}
+          </span>
           <button
             onClick={() => setMuted((m) => !m)}
             className="rounded-lg bg-white/5 px-2.5 py-1 text-sm transition hover:bg-white/10"
@@ -704,8 +712,8 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
           </div>
         </div>
       )}
-      {/* The galaxy (multiplayer): always syncing, opened by the Galaxy button once your nation reaches the Space Age */}
-      <Galaxy sim={sim} ownerName={playerName} planetName={planetName} open={galaxy && hud.god.spacefaring} onClose={() => setGalaxy(false)} />
+      {/* The galaxy (multiplayer): always syncing; join or leave any time, trade and invade from the Space Age */}
+      <Galaxy sim={sim} ownerName={playerName} planetName={planetName} demo={demo} spacefaring={hud.god.spacefaring} open={galaxy} onClose={() => setGalaxy(false)} onStatus={setLink} />
     </main>
   );
 }
