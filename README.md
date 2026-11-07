@@ -25,6 +25,20 @@ npm run dev
 
 Open http://localhost:3000, enter your name and create your planet.
 
+## Multiplayer galaxy
+
+1. Create a Supabase project.
+2. Copy the project URL and anon/service-role keys into `.env.local`:
+   ```bash
+   NEXT_PUBLIC_SUPABASE_URL=...
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+   SUPABASE_SERVICE_ROLE_KEY=...
+   ```
+3. Run `supabase/migrations/001_galaxy.sql` in the Supabase SQL editor.
+4. Enable Realtime for the `planets` and `planet_actions` tables.
+
+The Galaxy panel syncs each planet every five seconds. Players can trade resources or launch invasions; server-side SQL functions validate tokens, amounts, and invasion cooldowns. Realtime updates refresh the planet list.
+
 ## How we work
 
 - One branch per track (`nations`, `multiplayer`, `economy`, `polish`), with small PRs into `main`.

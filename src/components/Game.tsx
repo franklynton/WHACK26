@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Globe from "./Globe";
 import Upgrades, { affordableCount } from "./Upgrades";
+import Galaxy from "./Galaxy";
 import { UPGRADES, type UpgradeId } from "@/sim/upgrades";
 import { PlanetSim, type SimEvent } from "@/sim/planet";
 import { fallbackCiv, fallbackReaction, fallbackThought } from "@/lib/narrator";
@@ -363,6 +364,16 @@ export default function Game({ playerName, planetName = "Arda" }: { playerName: 
         </button>
         <p className="text-xs text-white/40">Drag to rotate · scroll to zoom · fate decides the weather, you can only talk</p>
       </div>
+      <Galaxy
+        ownerName={playerName}
+        planetName={planetName}
+        planetType={sim.type.name}
+        population={stats.population}
+        villages={stats.villages}
+        output={hud.output}
+        military={hud.military}
+        resources={stats.resources}
+      />
 
       {hover && hud.nations[hover.id] && <NationCard n={hud.nations[hover.id]} civ={civs[hover.id]} all={hud.nations} x={hover.x} y={hover.y} />}
 
