@@ -710,7 +710,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
               <button onClick={() => setSeenOutcome(true)} className="rounded-lg bg-white/10 px-4 py-2 text-sm font-semibold hover:bg-white/20">
                 Keep watching
               </button>
-              <button onClick={() => location.reload()} className="rounded-lg bg-sky-400/30 px-4 py-2 text-sm font-semibold hover:bg-sky-400/40">
+              <button onClick={() => (onNewPlanet ? onNewPlanet() : location.reload())} className="rounded-lg bg-sky-400/30 px-4 py-2 text-sm font-semibold hover:bg-sky-400/40">
                 New planet
               </button>
             </div>
