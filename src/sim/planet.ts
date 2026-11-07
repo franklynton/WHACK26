@@ -93,7 +93,7 @@ export type Weather = {
   id: number; face: number; pos: [number, number, number]; axis: [number, number, number]; storm: boolean;
   speed: number; age: number; life: number; rainTimer: number; nextStrike: number; flash: { face: number; at: number } | null;
 };
-const MAX_WEATHER = 8;
+const MAX_WEATHER = 16; // keep in step with MAX_WX in Globe.tsx
 const cap = (t: string) => t[0].toUpperCase() + t.slice(1);
 const FATE_TITLES: Record<GodPower, string> = {
   spawn: "Strangers", raise: "The earth rises", lower: "The sea rises", forest: "A new forest", rain: "Rain", drought: "Drought",
@@ -1087,8 +1087,10 @@ export class PlanetSim {
   // still give you the same real seconds to answer) and the eras climb faster on top of that.
   pace = 1;
   techBoost = 1;
+  demo = false; // no win/lose screen, so nothing interrupts a pitch
   startDemo() {
-    this.pace = 3;
+    this.demo = true;
+    this.pace = 4;
     this.techBoost = 2;
   }
 
@@ -1293,7 +1295,7 @@ export class PlanetSim {
     return alive.length ? alive.reduce((t, n) => t + this.loveOf(n.id), 0) / alive.length : 50;
   }
   private checkGoal() {
-    if (this.outcome || !this.nations.length || this.year < 20) return;
+    if (this.demo || this.outcome || !this.nations.length || this.year < 20) return;
     const mine = this.nations[0];
     if (!mine.alive) this.outcome = { won: false, title: "Your people have fallen", text: `${cap(mine.name)}, the people you chose, have been wiped out.` };
     else if (this.avgLove() < 15) this.outcome = { won: false, title: "The planet has turned on you", text: "Every nation now believes their god is cruel. They have stopped praying." };
@@ -1835,7 +1837,7 @@ export class PlanetSim {
     if (this.nextFate > 0 || !this.people.length) return;
     this.nextFate = 40 + Math.random() * 30;
     const bag: [GodPower, number][] = [
-      ["rain", 3], ["forest", 2], ["miracle", 2], ["peace", 2], ["drought", 2], ["discord", 2],
+      ["rain", 5], ["forest", 2], ["miracle", 2], ["peace", 2], ["drought", 2], ["discord", 2],
       ["raise", 1], ["lower", 1], ["fire", 1],
     ];
     let r = Math.random() * bag.reduce((t, [, w]) => t + w, 0);
@@ -2029,7 +2031,7 @@ export class PlanetSim {
   private stepWeather(dt: number) {
     this.nextWeather -= dt;
     if (this.nextWeather <= 0) {
-      this.nextWeather = 3 + Math.random() * 6;
+      this.nextWeather = 1.5 + Math.random() * 3; // a new cloud every few seconds
       const nearPeople = this.people.length && Math.random() < 0.6;
       const face = nearPeople ? this.people[Math.floor(Math.random() * this.people.length)].face : Math.floor(Math.random() * this.n);
       this.addWeather(face, Math.random() < 0.12);
@@ -2267,6 +2269,19 @@ export class PlanetSim {
     this.resources[r] = Math.max(0, this.resources[r] + amount);
     const home = this.nationHome(0);
     if (amount > 0 && home != null) this.announce("🛸", "A gift from the stars", `${other} sent ${amount} ${r}.`, home);
+  }
+
+  // Gold carried home by our fleet after a won invasion.
+  galaxyLoot(amount: number, other: string) {
+    this.resources.gold += amount;
+    const home = this.nationHome(0);
+    if (home != null) this.announce("⚔️", "Victory among the stars", `Your fleet raided ${other} and brought home ${amount} gold.`, home);
+  }
+
+  // Galaxy news with no effect on the sim (a god joins, a fleet is repelled).
+  galaxyNews(icon: string, title: string, text: string, minor = true) {
+    const home = this.nationHome(0);
+    if (home != null) this.announce(icon, title, text, home, minor);
   }
 
   // Another god's fleet raided us: some people die near the home village.

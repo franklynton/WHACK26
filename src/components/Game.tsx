@@ -5,7 +5,7 @@
 // (src/sim/planet.ts) to the LLM routes (/api/narrate, /api/mind).
 import { useCallback, useEffect, useRef, useState } from "react";
 import Globe from "./Globe";
-import Galaxy from "./Galaxy";
+import Galaxy, { type GalaxyStatus } from "./Galaxy";
 import LeaderDialog from "./LeaderDialog";
 import Portrait, { type Mood } from "./Portrait";
 import { ERAS, RACE, type RaceId } from "@/sim/races";
@@ -67,6 +67,7 @@ const RELATION_STYLE: Record<
 const THINK_EVERY_MS = 75_000; // each nation's mind speaks up on its own this often
 const THINK_GAP_MS = 20_000; // but minds take turns, at most one every 20 seconds
 const NEWS_GAP_MS = 20_000; // the chronicle tells at most one piece of news every 20 seconds
+const DEMO_GAPS = 0.4; // demo mode: the AI speaks 2.5x as often, to fit a 3-minute pitch
 
 type Entry = ChronicleEntry & { nation?: number };
 type Item = SimEvent & { nation: number }; // a queued event, pinned to the nation that tells it
@@ -174,6 +175,7 @@ export default function Game({
     document.addEventListener("pointerdown", closeOnOutsideClick);
     return () => document.removeEventListener("pointerdown", closeOnOutsideClick);
   }, [upgradesOpen]);
+  const [link, setLink] = useState<GalaxyStatus>({ enabled: null, galaxy: null, members: 0 }); // the galaxy connection, for the HUD
   useEffect(() => {
     const esc = (e: KeyboardEvent) => e.key === "Escape" && setMiracle(null);
     window.addEventListener("keydown", esc);
@@ -345,28 +347,12 @@ export default function Game({
     if (inFlight.current) return;
     const answer = answerDue.current;
     const genesis = answer == null ? genesisDue.current.shift() : undefined;
-    const next =
-      answer == null &&
-      genesis == null &&
-      Date.now() - lastNews.current > NEWS_GAP_MS
-        ? queue.current.shift()
-        : undefined;
+    const gap = sim.demo ? DEMO_GAPS : 1;
+    const next = answer == null && genesis == null && Date.now() - lastNews.current > NEWS_GAP_MS * gap ? queue.current.shift() : undefined;
     let thinker: number | null = answer;
-    if (
-      thinker == null &&
-      genesis == null &&
-      !next &&
-      Date.now() - lastAnyThought.current > THINK_GAP_MS
-    ) {
-      const ready = sim.nations.filter(
-        (n) =>
-          n.alive &&
-          civsRef.current[n.id] &&
-          Date.now() - lastThought.current[n.id] > THINK_EVERY_MS,
-      );
-      ready.sort(
-        (a, b) => lastThought.current[a.id] - lastThought.current[b.id],
-      );
+    if (thinker == null && genesis == null && !next && Date.now() - lastAnyThought.current > THINK_GAP_MS * gap) {
+      const ready = sim.nations.filter((n) => n.alive && civsRef.current[n.id] && Date.now() - lastThought.current[n.id] > THINK_EVERY_MS * gap);
+      ready.sort((a, b) => lastThought.current[a.id] - lastThought.current[b.id]);
       thinker = ready[0]?.id ?? null;
     }
     if (genesis == null && !next && thinker == null) return;
@@ -381,7 +367,7 @@ export default function Game({
         );
         setCiv(genesis, res.civ);
         addEntry({ ...res.entry, nation: genesis });
-        lastThought.current[genesis] = Date.now() - THINK_EVERY_MS + 15_000; // first words soon after waking
+        lastThought.current[genesis] = Date.now() - THINK_EVERY_MS * gap + 15_000 * gap; // first words soon after waking
       } else if (next) {
         setBusy("narrating");
         lastNews.current = Date.now();
@@ -475,8 +461,10 @@ export default function Game({
         if (nation == null) continue;
         if (!civsRef.current[nation]) {
           // A nation becomes self-aware when it founds its first village.
-          if (e.kind === "village" && !genesisDue.current.includes(nation))
+          if (e.kind === "village" && !genesisDue.current.includes(nation)) {
             genesisDue.current.push(nation);
+            genesisDue.current.sort((a, b) => a - b); // your own people (nation 0) wake first
+          }
           continue;
         }
         // Don't narrate the same kind of thing for the same nation twice in quick succession.
@@ -764,7 +752,7 @@ export default function Game({
               ))}
           </ul>
         </div>
-        <div className="mt-auto flex items-end justify-center gap-2">
+        <div className="mt-auto flex flex-wrap items-end justify-center gap-2 whitespace-nowrap">
           {onNewPlanet && (
             <button
               onClick={() =>
@@ -790,21 +778,24 @@ export default function Game({
               className="rounded-lg bg-indigo-400/15 px-2.5 py-1 text-xs text-indigo-200 transition hover:bg-indigo-400/30"
               title="Demo shortcut: your nation reaches the Space Age now"
             >
-              🚀 Skip to space
+              🚀 Go to space
             </button>
           )}
           <button
             onClick={() => setGalaxy(true)}
-            disabled={!hud.god.spacefaring}
-            className={`rounded-lg px-2.5 py-1 text-sm transition ${hud.god.spacefaring ? "bg-indigo-400/25 font-semibold hover:bg-indigo-400/40" : "bg-white/5 opacity-50"}`}
-            title={
-              hud.god.spacefaring
-                ? "Travel to other players' planets"
-                : `Locked: your nation must reach the Space Age (now in the ${ERAS[hud.nations[0]?.era ?? 0]})`
-            }
+            className={`rounded-lg px-2.5 py-1 text-sm transition ${hud.god.spacefaring ? "bg-indigo-400/25 font-semibold hover:bg-indigo-400/40" : "bg-white/5 hover:bg-white/10"}`}
+            title={hud.god.spacefaring ? "Trade with or invade the planets in your galaxy" : `Join or leave a galaxy. Trading and invading unlock at the Space Age (your nation is in the ${ERAS[hud.nations[0]?.era ?? 0]})`}
           >
-            {hud.god.spacefaring ? "🌌 Galaxy" : "🔒 Galaxy"}
+            🌌 Galaxy
           </button>
+          {/* Connection pill: green with how full your galaxy is, "solo" when you're in none, grey when offline */}
+          <span
+            className={`flex shrink-0 items-center gap-1 self-center whitespace-nowrap rounded-full px-1.5 py-0.5 text-[11px] tabular-nums ${link.enabled && link.members ? "bg-emerald-400/15 text-emerald-200" : "bg-white/5 text-white/40"}`}
+            title={!link.enabled ? "Galaxy offline" : link.galaxy ? `In galaxy ${link.galaxy}: ${link.members}/5 gods` : link.members ? `${link.members} gods online` : "Not in a galaxy"}
+          >
+            <span className={`h-1.5 w-1.5 rounded-full ${link.enabled ? (link.members ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]" : "bg-white/50") : "bg-white/30"}`} />
+            {!link.enabled ? "off" : link.galaxy ? `${link.members}/5` : link.members ? link.members : "solo"}
+          </span>
           <button
             onClick={() => setMuted((m) => !m)}
             className="rounded-lg bg-white/5 px-2.5 py-1 text-sm transition hover:bg-white/10"
@@ -1193,24 +1184,15 @@ export default function Game({
               >
                 Keep watching
               </button>
-              <button
-                onClick={() => location.reload()}
-                className="rounded-lg bg-sky-400/30 px-4 py-2 text-sm font-semibold hover:bg-sky-400/40"
-              >
+              <button onClick={() => (onNewPlanet ? onNewPlanet() : location.reload())} className="rounded-lg bg-sky-400/30 px-4 py-2 text-sm font-semibold hover:bg-sky-400/40">
                 New planet
               </button>
             </div>
           </div>
         </div>
       )}
-      {/* The galaxy (multiplayer): always syncing, opened by the Galaxy button once your nation reaches the Space Age */}
-      <Galaxy
-        sim={sim}
-        ownerName={playerName}
-        planetName={planetName}
-        open={galaxy && hud.god.spacefaring}
-        onClose={() => setGalaxy(false)}
-      />
+      {/* The galaxy (multiplayer): always syncing; join or leave any time, trade and invade from the Space Age */}
+      <Galaxy sim={sim} ownerName={playerName} planetName={planetName} demo={demo} spacefaring={hud.god.spacefaring} open={galaxy} onClose={() => setGalaxy(false)} onStatus={setLink} />
     </main>
   );
 }

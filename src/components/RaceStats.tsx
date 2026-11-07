@@ -37,7 +37,7 @@ export function raceStats(r: Race): Stat[] {
   ];
 }
 
-const RES_ICON: Record<keyof Resources, string> = { food: "🌾", wood: "🪵", stone: "🪨", metal: "⚙️", gold: "🪙", herbs: "🌿" };
+const RES_ICON: Record<keyof Resources, string> = { food: "🌾", wood: "🪵", stone: "🪨", metal: "⚙️", gold: "💰", herbs: "🌿" };
 
 export default function RaceStats({ race, compact = false }: { race: RaceId; compact?: boolean }) {
   const r = RACE[race];
