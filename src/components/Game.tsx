@@ -33,6 +33,7 @@ const RELATION_STYLE: Record<Relation, { icon: string; cls: string; label: strin
 const THINK_EVERY_MS = 75_000; // each nation's mind speaks up on its own this often
 const THINK_GAP_MS = 20_000; // but minds take turns, at most one every 20 seconds
 const NEWS_GAP_MS = 20_000; // the chronicle tells at most one piece of news every 20 seconds
+const DEMO_GAPS = 0.4; // demo mode: the AI speaks 2.5x as often, to fit a 3-minute pitch
 
 type Entry = ChronicleEntry & { nation?: number };
 type Item = SimEvent & { nation: number }; // a queued event, pinned to the nation that tells it
@@ -223,10 +224,11 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
     if (inFlight.current) return;
     const answer = answerDue.current;
     const genesis = answer == null ? genesisDue.current.shift() : undefined;
-    const next = answer == null && genesis == null && Date.now() - lastNews.current > NEWS_GAP_MS ? queue.current.shift() : undefined;
+    const gap = sim.demo ? DEMO_GAPS : 1;
+    const next = answer == null && genesis == null && Date.now() - lastNews.current > NEWS_GAP_MS * gap ? queue.current.shift() : undefined;
     let thinker: number | null = answer;
-    if (thinker == null && genesis == null && !next && Date.now() - lastAnyThought.current > THINK_GAP_MS) {
-      const ready = sim.nations.filter((n) => n.alive && civsRef.current[n.id] && Date.now() - lastThought.current[n.id] > THINK_EVERY_MS);
+    if (thinker == null && genesis == null && !next && Date.now() - lastAnyThought.current > THINK_GAP_MS * gap) {
+      const ready = sim.nations.filter((n) => n.alive && civsRef.current[n.id] && Date.now() - lastThought.current[n.id] > THINK_EVERY_MS * gap);
       ready.sort((a, b) => lastThought.current[a.id] - lastThought.current[b.id]);
       thinker = ready[0]?.id ?? null;
     }
@@ -239,7 +241,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
         const res = await post<{ civ: Civ; entry: ChronicleEntry }>("/api/narrate", { world: worldFor(genesis), kind: "genesis" });
         setCiv(genesis, res.civ);
         addEntry({ ...res.entry, nation: genesis });
-        lastThought.current[genesis] = Date.now() - THINK_EVERY_MS + 15_000; // first words soon after waking
+        lastThought.current[genesis] = Date.now() - THINK_EVERY_MS * gap + 15_000 * gap; // first words soon after waking
       } else if (next) {
         setBusy("narrating");
         lastNews.current = Date.now();
@@ -300,7 +302,10 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
         if (nation == null) continue;
         if (!civsRef.current[nation]) {
           // A nation becomes self-aware when it founds its first village.
-          if (e.kind === "village" && !genesisDue.current.includes(nation)) genesisDue.current.push(nation);
+          if (e.kind === "village" && !genesisDue.current.includes(nation)) {
+            genesisDue.current.push(nation);
+            genesisDue.current.sort((a, b) => a - b); // your own people (nation 0) wake first
+          }
           continue;
         }
         // Don't narrate the same kind of thing for the same nation twice in quick succession.
@@ -483,7 +488,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
             ))}
           </ul>
         </div>
-        <div className="mt-auto flex items-end justify-center gap-2">
+        <div className="mt-auto flex flex-wrap items-end justify-center gap-2 whitespace-nowrap">
           {onNewPlanet && (
             <button
               onClick={() => (demo || confirm("Start over on a new planet? This planet will be lost.")) && onNewPlanet()}
@@ -499,7 +504,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
               className="rounded-lg bg-indigo-400/15 px-2.5 py-1 text-xs text-indigo-200 transition hover:bg-indigo-400/30"
               title="Demo shortcut: your nation reaches the Space Age now"
             >
-              🚀 Skip to space
+              🚀 Go to space
             </button>
           )}
           <button

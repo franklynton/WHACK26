@@ -729,7 +729,7 @@ function Sun() {
 
 const WX_PUFFS = 9;
 const DROPS = 70;
-const MAX_WX = 8;
+const MAX_WX = 16; // matches MAX_WEATHER in planet.ts
 // Fixed puff offsets in a cloud's local frame (x, z across the surface; y up).
 const PUFF_OFFSETS = Array.from({ length: WX_PUFFS }, (_, k) => {
   const a = (k / WX_PUFFS) * Math.PI * 2 + tileRand(k, 1);

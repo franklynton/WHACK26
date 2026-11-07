@@ -146,11 +146,11 @@ export default function Landing({ onStart }: { onStart: (playerName: string, pla
                 className={`rounded-lg px-3 py-2 text-left transition ${demo === d ? "bg-sky-400/25 ring-1 ring-sky-300" : "bg-white/5 hover:bg-white/10"}`}
               >
                 <span className="block text-sm font-semibold">{d ? "🎬 Demo" : "🌍 Full game"}</span>
-                <span className="block text-xs text-white/55">{d ? "A speedrun: 3x speed, Space Age in minutes" : "Real pace, saved in this browser"}</span>
+                <span className="block text-xs text-white/55">{d ? "A 3-minute speedrun: 4x speed, Space Age in about a minute" : "Real pace, saved in this browser"}</span>
               </button>
             ))}
           </div>
-          {demo && <p className="text-xs text-white/55">For presentations. The same game at triple speed, with faster eras and a button to skip to space. It saves separately, so your real planet is untouched.</p>}
+          {demo && <p className="text-xs text-white/55">For presentations. The same game at 4x speed, with faster eras, chattier AI, no game-over screen and a button to skip to space. It saves separately, so your real planet is untouched.</p>}
           <label htmlFor="galaxy" className="label mt-1">
             Galaxy code <span className="normal-case text-white/40">(optional)</span>
           </label>
