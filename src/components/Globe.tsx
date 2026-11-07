@@ -87,7 +87,7 @@ function PlanetMesh({ sim, tool, onPaint, onHover }: { sim: PlanetSim; tool: Too
         if (o >= 0) {
           let edge = false;
           for (let k = 0; k < 3; k++) if (sim.owner[sim.neighbours[f * 3 + k]] !== o) edge = true;
-          c.lerp(nationCols[o], edge ? 0.8 : 0.25);
+          c.lerp(nationCols[o], edge ? 0.95 : 0.3);
         }
       }
       tile[f * 3] = c.r;
