@@ -3,12 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PlanetSim } from "@/sim/planet";
 import type { Resources } from "@/types/world";
-import { PUBLIC, cleanGalaxy, getGalaxy, setGalaxy, shareLink } from "@/lib/galaxyCode";
+import { CODE_RULE, GALAXY_MAX, cleanCode, joinError, setWantedGalaxy, shareLink, typeCode, wantedGalaxy } from "@/lib/galaxyCode";
 
-// Multiplayer: every planet syncs a snapshot to the shared galaxy (Supabase, through /api/galaxy) every few
-// seconds. Once your nation reaches the Space Age you can send resources to, or invade, other gods' planets.
-// Trades and invasions are settled by SQL functions; each game then applies the result to its own sim.
-// Planets only meet planets with the same galaxy code (lib/galaxyCode.ts).
+// Multiplayer: every planet syncs a snapshot to Supabase (through /api/galaxy) every few seconds.
+// Galaxies are temporary rooms of up to 5 gods, named by a code: the first god to use a code creates it,
+// others join until it's full, anyone can leave at any time, and an empty galaxy is deleted (migration 003).
+// Once your nation reaches the Space Age you can send resources to, or invade, the other planets in your
+// galaxy. Those are settled by SQL functions and applied to each sim, so they stay done after you leave.
 
 interface PlanetRow {
   world_id: string;
@@ -44,36 +45,44 @@ function stored(key: string) {
   }
 }
 
+// A POST to /api/galaxy; the body carries our planet's id and owner token.
+async function postGalaxy(body: Record<string, unknown>) {
+  const res = await fetch("/api/galaxy", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  return { res, data: await res.json().catch(() => ({})) };
+}
+
 export interface GalaxyStatus {
   enabled: boolean | null; // null until the first answer from the server
-  online: number; // other planets online in this galaxy
-  galaxy: string;
+  galaxy: string | null; // the galaxy we're in, or null
+  members: number; // gods in it, counting us
 }
 
 export default function Galaxy({
-  sim, ownerName, planetName, demo, open, onClose, onStatus,
-}: { sim: PlanetSim; ownerName: string; planetName: string; demo?: boolean; open: boolean; onClose: () => void; onStatus?: (s: GalaxyStatus) => void }) {
-  const ids = useRef<{ world: string; token: string } | null>(null);
+  sim, ownerName, planetName, demo, spacefaring, open, onClose, onStatus,
+}: { sim: PlanetSim; ownerName: string; planetName: string; demo?: boolean; spacefaring: boolean; open: boolean; onClose: () => void; onStatus?: (s: GalaxyStatus) => void }) {
   const since = useRef<number | null>(null);
   const names = useRef(new Map<string, string>());
-  const seen = useRef<Set<string> | null>(null); // planets met so far, to announce newcomers
-  const [galaxy, setGalaxyCode] = useState(getGalaxy);
-  const [codes, setCodes] = useState(true); // false until migration 003 is run: everyone shares one galaxy
-  const [draft, setDraft] = useState("");
+  const wanted = useRef<string | null>(null); // the galaxy we mean to be in (kept in the browser, so a refresh rejoins it)
+  const joining = useRef(false);
+  const seen = useRef<{ galaxy: string | null; gods: Map<string, PlanetRow> } | null>(null); // to announce arrivals and departures
   const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [rooms, setRooms] = useState(true); // false until migration 003 is run: then everyone online shares one galaxy
+  const [galaxy, setGalaxy] = useState<string | null>(null);
   const [planets, setPlanets] = useState<PlanetRow[]>([]);
+  const [draft, setDraft] = useState("");
+  const [error, setError] = useState(""); // a join that failed, shown under the code box like a form error
   const [resource, setResource] = useState<keyof Resources>("gold");
   const [amount, setAmount] = useState(10);
   const [message, setMessage] = useState("");
 
-  // The demo is a separate planet, so it gets its own row in the galaxy.
-  const tag = useRef(demo ? "-demo" : "");
-  const me = () => (ids.current ??= { world: stored(`arda-world-id${tag.current}`), token: stored(`arda-owner-token${tag.current}`) });
+  // This planet's id and the secret token that owns its row. The demo is a separate planet, so it gets its own.
+  const [ids] = useState(() => ({ world: stored(`arda-world-id${demo ? "-demo" : ""}`), token: stored(`arda-owner-token${demo ? "-demo" : ""}`) }));
+  const post = useCallback((body: Record<string, unknown>) => postGalaxy({ ...body, worldId: ids.world, ownerToken: ids.token }), [ids]);
 
   // Trades and invasions that involve us land in our sim (the other side's game applies its half).
   const apply = useCallback(
     (a: Action) => {
-      const mine = a.source_world_id === me().world;
+      const mine = a.source_world_id === ids.world;
       const other = names.current.get(mine ? a.target_world_id : a.source_world_id) ?? "another planet";
       if (a.action_type === "trade" && a.payload.resource && a.payload.amount) sim.galaxyTrade(a.payload.resource, mine ? -a.payload.amount : a.payload.amount, other);
       if (a.action_type === "invasion") {
@@ -84,72 +93,123 @@ export default function Galaxy({
         else sim.galaxyNews("🛡️", "Invasion repelled", `A fleet from ${other} attacked, and your people drove it off.`);
       }
     },
-    [sim],
+    [sim, ids],
+  );
+
+  // Joins the galaxy with this code, or creates it if nobody is using it. `auto` is a rejoin we
+  // started ourselves (after a refresh, or after being away too long), so a failure is a pop-up too.
+  const join = useCallback(
+    async (code: string, auto = false): Promise<boolean> => {
+      const c = cleanCode(code);
+      if (!c) {
+        setError(CODE_RULE);
+        return false;
+      }
+      if (joining.current) return false;
+      joining.current = true;
+      try {
+        const { data } = await post({ action: "join", code: c });
+        if (data.ok) {
+          wanted.current = c;
+          setWantedGalaxy(c);
+          setGalaxy(c);
+          setError("");
+          setDraft("");
+          setMessage(data.created ? `You created galaxy ${c}. Share the code so others can join.` : `You joined galaxy ${c}.`);
+          if (!auto) sim.galaxyNews("🌌", data.created ? "A new galaxy" : "You joined a galaxy", data.created ? `You created galaxy ${c}. Up to ${GALAXY_MAX} gods can join.` : `You joined galaxy ${c} (${data.members}/${GALAXY_MAX} gods).`);
+          return true;
+        }
+        const why = joinError(data.reason, c, data.members);
+        setError(why);
+        if (auto) {
+          // Our place went while we were away (or the galaxy filled up before we arrived): stop retrying.
+          wanted.current = null;
+          setWantedGalaxy(null);
+          sim.galaxyNews("🌌", "Couldn't rejoin the galaxy", why);
+        }
+        return false;
+      } catch {
+        setError(joinError(undefined, c));
+        return false;
+      } finally {
+        joining.current = false;
+      }
+    },
+    [sim, post],
   );
 
   const load = useCallback(async () => {
     try {
-      const q = `worldId=${encodeURIComponent(me().world)}&galaxy=${galaxy}${since.current != null ? `&since=${since.current}` : ""}`;
+      const q = `worldId=${encodeURIComponent(ids.world)}${since.current != null ? `&since=${since.current}` : ""}`;
       const res = await fetch(`/api/galaxy?${q}`);
       const data = await res.json();
       setEnabled(Boolean(data.enabled) && res.ok);
       if (!res.ok) return setMessage(data.error || "Galaxy database setup failed");
       const rows = data.planets as PlanetRow[];
+      const here: string | null = data.galaxy ?? null;
       for (const p of rows) names.current.set(p.world_id, p.planet_name);
-      // Announce gods who arrive after we do (not the ones already here when we joined).
-      if (seen.current) for (const p of rows) if (!seen.current.has(p.world_id)) sim.galaxyNews("🛸", "A new god appears", `${p.owner_name} and the planet ${p.planet_name} have joined the galaxy.`, false);
-      seen.current = new Set([...(seen.current ?? []), ...rows.map((p) => p.world_id)]);
+      setRooms(data.rooms !== false);
+      setGalaxy(here);
       setPlanets(rows);
-      setCodes(data.codes !== false);
+      // Announce gods who arrive or leave after we're in (not the ones already here when we joined).
+      const now = new Map(rows.map((p) => [p.world_id, p]));
+      if (seen.current && seen.current.galaxy === here) {
+        for (const p of rows) if (!seen.current.gods.has(p.world_id)) sim.galaxyNews("🛸", "A new god appears", `${p.owner_name} and the planet ${p.planet_name} have joined the galaxy.`, false);
+        for (const [id, p] of seen.current.gods) if (!now.has(id)) sim.galaxyNews("👋", "A god has left", `${p.owner_name} and ${p.planet_name} left the galaxy.`);
+      }
+      seen.current = { galaxy: here, gods: now };
       if (since.current != null) (data.actions as Action[]).forEach(apply);
       since.current = data.lastActionId ?? since.current;
+      // We mean to be in a galaxy but aren't (a fresh tab, or we were away too long): rejoin it.
+      if (data.rooms !== false && wanted.current && here !== wanted.current) join(wanted.current, true);
     } catch {
       setEnabled(false);
     }
-  }, [apply, galaxy, sim]);
+  }, [apply, join, sim, ids]);
 
   const sync = useCallback(async () => {
     const s = sim.stats();
-    const { world, token } = me();
-    const hash = [...world].reduce((n, c) => (n * 31 + c.charCodeAt(0)) | 0, 7);
+    const hash = [...ids.world].reduce((n, c) => (n * 31 + c.charCodeAt(0)) | 0, 7);
     try {
-      const res = await fetch("/api/galaxy", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "sync", worldId: world, ownerToken: token, ownerName, planetName, planetType: s.planetType, galaxy,
-          population: s.population, villages: s.villages, output: Math.round(sim.output), military: sim.military(), resources: s.resources,
-          positionX: (hash & 0xffff) / 0xffff, positionY: ((hash >>> 16) & 0xffff) / 0xffff,
-        }),
+      const { res } = await post({
+        action: "sync", ownerName, planetName, planetType: s.planetType,
+        population: s.population, villages: s.villages, output: Math.round(sim.output), military: sim.military(), resources: s.resources,
+        positionX: (hash & 0xffff) / 0xffff, positionY: ((hash >>> 16) & 0xffff) / 0xffff,
       });
       if (res.status === 503) return setEnabled(false);
       await load();
     } catch {
       setEnabled(false);
     }
-  }, [sim, ownerName, planetName, galaxy, load]);
+  }, [sim, ownerName, planetName, load, post, ids]);
 
   useEffect(() => {
+    wanted.current = wantedGalaxy(); // from the landing page, a shared link, or last time
     sync();
     const timer = window.setInterval(sync, 5000);
     return () => window.clearInterval(timer);
   }, [sync]);
 
-  // The HUD shows whether we're connected and how many gods are online.
+  // The HUD shows whether we're connected, which galaxy we're in and how full it is.
   useEffect(() => {
-    onStatus?.({ enabled, online: enabled ? planets.length : 0, galaxy: codes ? galaxy : PUBLIC });
-  }, [enabled, planets.length, galaxy, codes, onStatus]);
+    onStatus?.({ enabled, galaxy: rooms ? galaxy : null, members: galaxy || !rooms ? planets.length + 1 : 0 });
+  }, [enabled, rooms, galaxy, planets.length, onStatus]);
 
-  const join = (code: string) => {
-    const g = setGalaxy(code);
-    seen.current = null; // a new galaxy: the gods already there aren't newcomers
+  const leave = async () => {
+    const was = galaxy;
+    wanted.current = null;
+    setWantedGalaxy(null);
+    setGalaxy(null);
     setPlanets([]);
-    setGalaxyCode(g);
-    setDraft("");
-    setMessage(g === PUBLIC ? "You're in the open galaxy." : `You're in galaxy ${g}. Share the code so others can join.`);
+    seen.current = null;
+    try {
+      await post({ action: "leave" });
+    } catch {}
+    setMessage(`You left galaxy ${was}. Your planet keeps everything it traded, won or lost.`);
   };
 
   const copyLink = async () => {
+    if (!galaxy) return;
     try {
       await navigator.clipboard.writeText(shareLink(galaxy));
       setMessage("Link copied.");
@@ -162,18 +222,13 @@ export default function Galaxy({
     if (action === "trade" && sim.resources[resource] < amount) return setMessage(`You only have ${Math.floor(sim.resources[resource])} ${resource}.`);
     setMessage("Your ships set off...");
     await sync(); // so the galaxy knows what we hold right now
-    const { world, token } = me();
-    const res = await fetch("/api/galaxy", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action, worldId: world, ownerToken: token, targetWorldId: target, resource, amount }),
-    });
-    const data = await res.json();
+    const { data } = await post({ action, targetWorldId: target, resource, amount });
     setMessage(data.message || data.error || "Galaxy action failed");
     await load(); // picks up the completed action and applies our half of it
   };
 
   if (!open) return null;
+  const members = planets.length + 1;
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
       <div className="glass max-h-[80vh] w-[28rem] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
@@ -183,48 +238,85 @@ export default function Galaxy({
             ✕
           </button>
         </div>
-        <p className="mb-3 text-sm text-white/65">Your people have left {planetName}. Send resources to other gods&apos; planets, or invade them for gold.</p>
-        {enabled && (
+        <p className="mb-3 text-sm text-white/65">
+          {spacefaring
+            ? <>Your people have left {planetName}. Send resources to other gods&apos; planets in your galaxy, or invade them for gold.</>
+            : <>Gather with other gods now. Once your people reach the Space Age, you can trade with or invade the planets in your galaxy.</>}
+        </p>
+
+        {enabled === false && <p className="mb-3 text-sm text-amber-200">{message || "The galaxy is offline: Supabase isn't configured yet."}</p>}
+        {enabled && !rooms && <p className="mb-3 text-xs text-amber-200">Galaxy rooms aren&apos;t set up yet (run migration 003 in Supabase). Until then, every god online shares one galaxy.</p>}
+
+        {/* Not in a galaxy: join one by its code, or create it with a new code */}
+        {enabled && rooms && !galaxy && (
+          <form
+            className="mb-3 rounded-lg bg-white/5 p-3"
+            noValidate
+            onSubmit={(e) => {
+              e.preventDefault();
+              join(draft);
+            }}
+          >
+            <label htmlFor="galaxy-code" className="text-sm font-semibold">
+              Join a galaxy
+            </label>
+            <p className="mb-2 text-xs text-white/55">Enter a friend&apos;s code to join their galaxy, or a new code to create one. Up to {GALAXY_MAX} gods per galaxy.</p>
+            <div className="flex gap-2">
+              <input
+                id="galaxy-code"
+                value={draft}
+                onChange={(e) => {
+                  setDraft(typeCode(e.target.value));
+                  setError("");
+                }}
+                placeholder="NOTTS"
+                aria-invalid={!!error}
+                aria-describedby={error ? "galaxy-error" : undefined}
+                className={`flex-1 rounded-lg bg-white/10 px-3 py-1.5 font-mono text-sm uppercase outline-none placeholder:text-white/30 ${error ? "ring-1 ring-rose-400" : "focus:ring-1 focus:ring-indigo-300"}`}
+              />
+              <button className="rounded-lg bg-indigo-400/25 px-3 py-1.5 text-xs font-semibold hover:bg-indigo-400/40">Join or create</button>
+            </div>
+            {error && (
+              <p id="galaxy-error" role="alert" className="mt-2 text-xs text-rose-300">
+                {error}
+              </p>
+            )}
+            {message && !error && <p className="mt-2 text-xs text-sky-200">{message}</p>}
+          </form>
+        )}
+
+        {/* In a galaxy: who's here, how full it is, and a way out */}
+        {enabled && rooms && galaxy && (
           <div className="mb-3 rounded-lg bg-white/5 p-3">
             <div className="flex items-center justify-between gap-2">
               <p className="text-sm">
-                Galaxy <span className="font-mono font-bold text-indigo-200">{galaxy === PUBLIC ? "open" : galaxy}</span>
-                <span className="text-white/50"> · {planets.length} other {planets.length === 1 ? "god" : "gods"} online</span>
+                Galaxy <span className="font-mono font-bold text-indigo-200">{galaxy}</span>
+                <span className="text-white/50">
+                  {" "}· {members}/{GALAXY_MAX} gods
+                </span>
               </p>
-              {galaxy !== PUBLIC && (
+              <div className="flex gap-3">
                 <button onClick={copyLink} className="text-xs text-sky-300 hover:text-sky-200">
                   Copy link
                 </button>
-              )}
-            </div>
-            <form
-              className="mt-2 flex gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                join(draft);
-              }}
-            >
-              <input
-                value={draft}
-                onChange={(e) => setDraft(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12))}
-                placeholder="Galaxy code, e.g. NOTTS"
-                className="flex-1 rounded-lg bg-white/10 px-3 py-1.5 font-mono text-sm uppercase placeholder:normal-case placeholder:font-sans"
-              />
-              <button disabled={!draft || cleanGalaxy(draft) === galaxy} className="rounded-lg bg-indigo-400/25 px-3 py-1.5 text-xs font-semibold hover:bg-indigo-400/40 disabled:opacity-40">
-                Join
-              </button>
-              {galaxy !== PUBLIC && (
-                <button type="button" onClick={() => join(PUBLIC)} className="rounded-lg bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10">
+                <button onClick={leave} className="text-xs text-rose-300 hover:text-rose-200">
                   Leave
                 </button>
-              )}
-            </form>
+              </div>
+            </div>
+            <div className="mt-2 flex gap-1" aria-hidden>
+              {Array.from({ length: GALAXY_MAX }, (_, i) => (
+                <span key={i} className={`h-1.5 flex-1 rounded-full ${i < members ? "bg-indigo-300" : "bg-white/10"}`} />
+              ))}
+            </div>
             {message && <p className="mt-2 text-xs text-sky-200">{message}</p>}
-            {!codes && galaxy !== PUBLIC && <p className="mt-2 text-xs text-amber-200">Galaxy codes need migration 003 in Supabase. Until then, everyone shares the open galaxy.</p>}
           </div>
         )}
-        {enabled === false && <p className="mb-3 text-sm text-amber-200">{message || "The galaxy is offline: Supabase isn't configured yet."}</p>}
-        {enabled && planets.length === 0 && <p className="text-sm text-white/50">No other gods are online{galaxy === PUBLIC ? "" : ` in galaxy ${galaxy}`}. Open Arda in another browser (or a private window){galaxy === PUBLIC ? "" : " with the same code"} to make one.</p>}
+
+        {enabled && (galaxy || !rooms) && planets.length === 0 && (
+          <p className="text-sm text-white/50">You&apos;re the only god here{galaxy ? `. Share the code ${galaxy} (or the link) so others can join` : ""}.</p>
+        )}
+        {enabled && !spacefaring && planets.length > 0 && <p className="mb-2 text-xs text-white/45">🔒 Trading and invading unlock when your people reach the Space Age.</p>}
         {enabled && planets.length > 0 && (
           <>
             <div className="mb-3 flex gap-2">
@@ -260,10 +352,10 @@ export default function Galaxy({
                     {p.population} people · {p.output}/yr
                   </p>
                   <div className="mt-2 flex gap-2">
-                    <button onClick={() => act("trade", p.world_id)} className="flex-1 rounded bg-emerald-400/15 px-2 py-1.5 text-xs text-emerald-200 hover:bg-emerald-400/25">
+                    <button disabled={!spacefaring} onClick={() => act("trade", p.world_id)} className="flex-1 rounded bg-emerald-400/15 px-2 py-1.5 text-xs text-emerald-200 hover:bg-emerald-400/25 disabled:opacity-40">
                       Send {amount} {resource}
                     </button>
-                    <button onClick={() => act("invasion", p.world_id)} className="flex-1 rounded bg-rose-400/15 px-2 py-1.5 text-xs text-rose-200 hover:bg-rose-400/25">
+                    <button disabled={!spacefaring} onClick={() => act("invasion", p.world_id)} className="flex-1 rounded bg-rose-400/15 px-2 py-1.5 text-xs text-rose-200 hover:bg-rose-400/25 disabled:opacity-40">
                       Invade
                     </button>
                   </div>

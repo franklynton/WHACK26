@@ -1,33 +1,46 @@
-// The galaxy code this browser plays in. Planets only meet planets with the same code, so a demo
-// (or a group of friends) can have its own galaxy. "PUBLIC" is the open galaxy everyone shares.
+// The galaxy this browser wants to be in, remembered so a refresh (or coming back later) rejoins it.
+// Galaxies themselves live in the database as temporary rooms (migration 003); this is only the code.
 // A link like /?galaxy=NOTTS sets it, so a code is easy to share.
 
+export const GALAXY_MAX = 5;
 const KEY = "arda-galaxy";
-export const PUBLIC = "PUBLIC";
 
-export function cleanGalaxy(x: string | null | undefined) {
+// Codes are 3 to 12 letters or digits, upper case. Anything else is not a code.
+export function cleanCode(x: string | null | undefined) {
   const g = (x ?? "").trim().toUpperCase();
-  return /^[A-Z0-9]{1,12}$/.test(g) ? g : PUBLIC;
+  return /^[A-Z0-9]{3,12}$/.test(g) ? g : null;
 }
 
-export function getGalaxy() {
+// What to keep while typing: letters and digits only, upper case, at most 12.
+export const typeCode = (x: string) => x.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12);
+
+export const CODE_RULE = "Codes are 3 to 12 letters or numbers.";
+
+export function wantedGalaxy() {
   try {
-    const fromUrl = new URLSearchParams(window.location.search).get("galaxy");
-    if (fromUrl) localStorage.setItem(KEY, cleanGalaxy(fromUrl));
-    return cleanGalaxy(localStorage.getItem(KEY));
+    const fromUrl = cleanCode(new URLSearchParams(window.location.search).get("galaxy"));
+    if (fromUrl) localStorage.setItem(KEY, fromUrl);
+    return cleanCode(localStorage.getItem(KEY));
   } catch {
-    return PUBLIC;
+    return null;
   }
 }
 
-export function setGalaxy(code: string) {
-  const g = cleanGalaxy(code);
+export function setWantedGalaxy(code: string | null) {
   try {
-    localStorage.setItem(KEY, g);
+    if (code) localStorage.setItem(KEY, code);
+    else localStorage.removeItem(KEY);
   } catch {}
-  return g;
 }
 
 export function shareLink(code: string) {
   return `${window.location.origin}/?galaxy=${encodeURIComponent(code)}`;
+}
+
+// The message for a failed join, worded like a form error.
+export function joinError(reason: string | undefined, code: string, members?: number) {
+  if (reason === "full") return `Galaxy ${code} is full (${members ?? GALAXY_MAX}/${GALAXY_MAX} gods). Try another code.`;
+  if (reason === "invalid") return CODE_RULE;
+  if (reason === "not_migrated") return "Galaxy rooms aren't set up yet: run migration 003 in Supabase.";
+  return "Couldn't reach the galaxy. Try again.";
 }
