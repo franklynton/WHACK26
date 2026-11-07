@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Globe, { type Tool } from "./Globe";
 import { PlanetSim, type SimEvent } from "@/sim/planet";
+import { FALLBACK_CIV, fallbackReaction, fallbackThought } from "@/lib/narrator";
 import type { ChronicleEntry, ChronicleKind, Civ, Crisis, GodPower, MindMessage, Needs, PlanetStats, Policy, World } from "@/types/world";
 
 const TOOLS: { tool: Tool; label: string; icon: string }[] = [
@@ -215,22 +216,25 @@ export default function Game({ playerName }: { playerName: string }) {
             {reason && <p className="text-xs text-white/50">{reason}</p>}
           </div>
         )}
+        <div className="flex justify-between">
+          <Segmented options={BRUSHES.map((b) => b.label)} value={brush} onChange={setBrush} title="Brush" />
+          <Segmented options={SPEEDS.map((s) => s.label)} value={SPEEDS.findIndex((s) => s.speed === speed)} onChange={(i) => setSpeed(SPEEDS[i].speed)} title="Speed" />
+        </div>
         {!civ && <p className="text-xs text-white/55">Your people are wandering. Keep them fed and they will found a village, then become aware of you.</p>}
       </aside>
 
-      {/* God powers */}
-      <div className="glass absolute bottom-4 left-[calc(50%-1.5rem)] flex -translate-x-1/2 items-center gap-1 p-1.5">
-        {TOOLS.map((t) => (
-          <button key={t.tool} onClick={() => setTool(t.tool)} className={`tool ${tool === t.tool ? "tool-on" : ""}`} title={t.label}>
-            <span className="text-lg leading-none">{t.icon}</span>
-            {t.label}
-          </button>
-        ))}
-        <div className="mx-2 h-10 w-px bg-white/10" />
-        <Segmented options={BRUSHES.map((b) => b.label)} value={brush} onChange={setBrush} title="Brush" />
-        <Segmented options={SPEEDS.map((s) => s.label)} value={SPEEDS.findIndex((s) => s.speed === speed)} onChange={(i) => setSpeed(SPEEDS[i].speed)} title="Speed" />
+      {/* God powers: centred in the space between the two side panels */}
+      <div className="pointer-events-none absolute bottom-4 left-[17.5rem] right-[19.5rem] flex flex-col items-center gap-1.5">
+        <p className="text-xs text-white/40">Left-drag to use a power · right-drag to rotate · scroll to zoom</p>
+        <div className="glass pointer-events-auto flex flex-wrap justify-center gap-1 p-1.5">
+          {TOOLS.map((t) => (
+            <button key={t.tool} onClick={() => setTool(t.tool)} className={`tool ${tool === t.tool ? "tool-on" : ""}`} title={t.label}>
+              <span className="text-lg leading-none">{t.icon}</span>
+              {t.label}
+            </button>
+          ))}
+        </div>
       </div>
-      <p className="pointer-events-none absolute bottom-[5.5rem] left-[calc(50%-1.5rem)] -translate-x-1/2 text-xs text-white/40">Left-drag to use a power · right-drag to rotate · scroll to zoom</p>
 
       {/* The people's shared mind */}
       <aside className="glass absolute bottom-4 right-4 top-4 flex w-72 flex-col p-4">
@@ -290,10 +294,29 @@ function readHud(sim: PlanetSim): Hud {
   return { year: sim.year, stats: sim.stats(), needs: sim.needs(), crisis: sim.crisis(), policy: sim.policy };
 }
 
+// Calls an LLM route. If the server can't be reached (for example the static demo build,
+// which has no API routes), answer with the same canned fallbacks the server would use.
 async function post<T>(url: string, body: unknown): Promise<T> {
-  const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-  if (!res.ok) throw new Error(`${url} ${res.status}`);
-  return res.json();
+  try {
+    const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    if (!res.ok) throw new Error(`${url} ${res.status}`);
+    return await res.json();
+  } catch {
+    return offline(url, body as { world: World; kind?: ChronicleKind; detail?: string; chat?: MindMessage[] }) as T;
+  }
+}
+
+function offline(url: string, { world, kind, chat = [] }: { world: World; kind?: ChronicleKind; chat?: MindMessage[] }) {
+  if (url === "/api/mind") {
+    const t = fallbackThought(world, chat);
+    return { civ: { ...world.civ, attitude: t.attitude }, reply: t.reply, policy: t.policy, reason: t.reason };
+  }
+  if (kind === "genesis" || !world.civ) {
+    const c = FALLBACK_CIV;
+    return { civ: c, entry: { year: world.year, kind: "genesis", text: `${c.demonym[0].toUpperCase()}${c.demonym.slice(1)} light their first fires and name their world ${c.name}.` } };
+  }
+  const r = fallbackReaction(world, kind ?? "milestone");
+  return { civ: { ...world.civ, attitude: r.attitude }, entry: { year: world.year, kind, text: r.text } };
 }
 
 function Stock({ icon, label, value }: { icon: string; label: string; value: number }) {
