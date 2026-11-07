@@ -34,6 +34,9 @@ The other nations worship the same god in their own ways, and you may trade with
 You see the world only through your people's eyes and invent explanations for what the god does.
 Be vivid, specific, a little strange and a little funny. Use your invented words sometimes. Reply with ONLY a JSON object.`;
 
+// A random sound to nudge the AI towards a different name on every planet.
+const inspiration = () => word(pick(SYL.start), pick(SYL.mid), pick(SYL.end));
+
 export function genesisPrompt(w: World) {
   return {
     system: SYSTEM,
@@ -42,6 +45,7 @@ export function genesisPrompt(w: World) {
 Your people have just founded their first village and become self-aware. Invent yourselves. Return JSON:
 {"civ":{"name":string,"demonym":string,"language":{"name":string,"words":{"god":string,"water":string,"food":string,"enemy":string,"friend":string}},"religion":{"name":string,"godName":string,"belief":string},"attitude":"worship","myths":[string],"laws":[string]},"text":string}
 "godName" is what you call the god. "text" is the first chronicle entry, 1-2 sentences.
+Your name must be new and unusual (never Oru, Kessa, Velmor, Pallu or Drohm); let it sound something like "${inspiration()}".
 The religion must be entirely made up: its own name, rites, sacred places and beliefs shaped by this planet. Never borrow real-world religions, gods, prophets, scriptures or religious terms.${w.nation?.relations.length ? `\nYour name, language and religion must be clearly different from your neighbours: ${w.nation.relations.map((r) => r.name).join(", ")}.` : ""}`,
   };
 }
@@ -155,8 +159,29 @@ const FALLBACK_OTHERS: Civ[] = [
   },
 ];
 
+// Without the AI, a nation still gets its own made-up name and language: a random template
+// (religion, myths, laws) under freshly invented names, so every planet's peoples differ.
+const SYL = { start: ["Or", "Kes", "Vel", "Pal", "Dro", "Thar", "Ny", "Zel", "Aru", "Mok", "Sil", "Quo", "Bre", "Ixa", "Lum", "Rha"], mid: ["", "a", "e", "i", "o", "u", "an", "or", "el"], end: ["u", "sa", "mor", "lu", "hm", "vin", "dra", "keth", "nai", "ros", "tal", "mi"] };
+const pick = <T,>(a: T[]) => a[Math.floor(Math.random() * a.length)];
+// Glue syllables together without doubled-up vowels or consonants ("Ixa"+"a" -> "Ixa").
+const word = (...parts: string[]) => parts.reduce((w, p) => (p && w && (/[aeiou]$/i.test(w) === /^[aeiou]/i.test(p)) ? w + p.slice(1) : w + p), "");
+
 export function fallbackCiv(nation = 0): Civ {
-  return nation === 0 ? FALLBACK_CIV : FALLBACK_OTHERS[(nation - 1) % FALLBACK_OTHERS.length];
+  void nation; // every nation draws at random now
+  const t = pick([FALLBACK_CIV, ...FALLBACK_OTHERS]);
+  const name = word(pick(SYL.start), pick(SYL.mid), pick(SYL.end));
+  const stem = name.replace(/[aeiou]+$/, "");
+  const god = word(pick(SYL.start), pick(SYL.end));
+  const swap = (x: string) => x.split(t.religion.godName).join(god).split(t.demonym.replace(/^the /, "")).join(`${stem}i`);
+  return {
+    ...t,
+    name,
+    demonym: `the ${stem}i`,
+    language: { name: `${stem}ic`, words: { ...t.language.words, god } },
+    religion: { ...t.religion, godName: god, belief: swap(t.religion.belief) },
+    myths: t.myths.map(swap),
+    laws: t.laws.map(swap),
+  };
 }
 
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
