@@ -112,6 +112,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
   const answerDue = useRef<number | null>(null); // the god spoke to this nation and it hasn't answered yet
   const lastNews = useRef(0);
   const lastAlert = useRef(sim.alert);
+  const leaderSeeds = useRef<number[]>([]);
   const lastTold = useRef<Record<string, number>>({}); // year each kind of event was last narrated, per nation
 
   const setCiv = (id: number, civ: Civ) => {
@@ -235,6 +236,15 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
       if (civsRef.current.length < sim.nations.length) growTo(sim.nations.length);
       const h = readHud(sim);
       setHud(h);
+      // A new ruler (after a revolution) doesn't remember the old one's audiences.
+      h.nations.forEach((n) => {
+        const was = leaderSeeds.current[n.id];
+        leaderSeeds.current[n.id] = n.leader.seed;
+        if (was == null || was === n.leader.seed) return;
+        leaderChatsRef.current = leaderChatsRef.current.map((c, i) => (i === n.id ? [] : c));
+        setLeaderChats(leaderChatsRef.current);
+        setMoods((m) => m.map((x, i) => (i === n.id ? "pleased" : x)));
+      });
       if (h.alert && h.alert !== lastAlert.current) sound.forIcon(h.alert.icon); // each new pop-up has its own sound
       lastAlert.current = h.alert;
       for (const e of sim.events.splice(0)) {
@@ -405,6 +415,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
                   </div>
                   <div className="ml-4.5 flex flex-wrap gap-x-2 text-xs">
                     {n.alive && <span className="text-amber-200/70">{ERAS[n.era]}</span>}
+                    {!!n.ships && <span className="text-sky-200/80" title={`Navy: ${n.ships} warship${n.ships === 1 ? "" : "s"}`}>⚓ {n.ships}</span>}
                     {n.crisis && <span className="font-semibold uppercase text-rose-300">{n.crisis}</span>}
                     {n.relations
                       .filter((r) => n.alive && r.relation !== "peace")

@@ -1016,6 +1016,53 @@ function Droughts({ sim }: { sim: PlanetSim }) {
   );
 }
 
+// Warships: a dark hull and a sail in the nation's colour, sailing between sea tiles.
+const MAX_SHIPS_DRAWN = 80;
+function Ships({ sim }: { sim: PlanetSim }) {
+  const hulls = useRef<THREE.InstancedMesh>(null);
+  const sails = useRef<THREE.InstancedMesh>(null);
+  const tmp = useMemo(() => ({ m: new THREE.Matrix4(), a: new THREE.Vector3(), b: new THREE.Vector3(), up: new THREE.Vector3(), fwd: new THREE.Vector3(), right: new THREE.Vector3(), p: new THREE.Vector3(), c: new THREE.Color(), s: new THREE.Vector3(), q: new THREE.Quaternion(), sail: new THREE.Matrix4() }), []);
+  useFrame(({ clock }) => {
+    const h = hulls.current, sl = sails.current;
+    if (!h || !sl) return;
+    const { m, a, b, up, fwd, right, p, c, s, q, sail } = tmp;
+    const ships = sim.ships.slice(0, MAX_SHIPS_DRAWN);
+    ships.forEach((sh, i) => {
+      a.set(...sim.c(sh.from));
+      b.set(...sim.c(sh.face));
+      up.copy(a).lerp(b, Math.min(1, sh.t)).normalize();
+      fwd.copy(b).sub(a);
+      if (fwd.lengthSq() < 1e-9) fwd.set(0, 1, 0).cross(up);
+      fwd.addScaledVector(up, -fwd.dot(up)).normalize();
+      right.crossVectors(up, fwd).normalize();
+      const bob = Math.sin(clock.elapsedTime * 2 + sh.id) * 0.0006;
+      p.copy(up).multiplyScalar(SEA + 0.002 + bob);
+      m.makeBasis(right, up, fwd).setPosition(p);
+      q.setFromRotationMatrix(m);
+      h.setMatrixAt(i, m.compose(p, q, s.set(1, 1, 1)));
+      sail.compose(p.addScaledVector(up, 0.012), q, s.set(1, 1, 1));
+      sl.setMatrixAt(i, sail);
+      sl.setColorAt(i, c.set(sim.nations[sh.nation]?.color ?? "#ffffff"));
+    });
+    h.count = sl.count = ships.length;
+    h.instanceMatrix.needsUpdate = true;
+    sl.instanceMatrix.needsUpdate = true;
+    if (sl.instanceColor) sl.instanceColor.needsUpdate = true;
+  });
+  return (
+    <>
+      <instancedMesh ref={hulls} args={[undefined, undefined, MAX_SHIPS_DRAWN]} frustumCulled={false}>
+        <boxGeometry args={[0.012, 0.006, 0.032]} />
+        <meshStandardMaterial color="#4a3426" roughness={0.9} />
+      </instancedMesh>
+      <instancedMesh ref={sails} args={[undefined, undefined, MAX_SHIPS_DRAWN]} frustumCulled={false}>
+        <boxGeometry args={[0.02, 0.018, 0.0015]} />
+        <meshStandardMaterial roughness={0.8} emissive="#222222" />
+      </instancedMesh>
+    </>
+  );
+}
+
 // Runs the simulation in step with rendering, at `speed` years per second.
 function Clock({ sim, speed }: { sim: PlanetSim; speed: number }) {
   useFrame((_, dt) => {
@@ -1047,6 +1094,7 @@ export default function Globe({ sim, tool, speed, onPaint, onHover, focus }: { s
       <Weather sim={sim} />
       <Catastrophes sim={sim} />
       <Droughts sim={sim} />
+      <Ships sim={sim} />
       <Atmosphere />
       <OrbitControls
         enablePan={false}
