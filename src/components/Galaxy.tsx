@@ -142,14 +142,21 @@ export default function Galaxy({ sim, ownerName, planetName, open, onClose }: { 
         {enabled && planets.length > 0 && (
           <>
             <div className="mb-3 flex gap-2">
-              <select value={resource} onChange={(e) => setResource(e.target.value as keyof Resources)} className="flex-1 rounded-lg bg-white/10 px-3 py-2 text-sm">
+              {/* Buttons, not a native <select>: the HUD re-renders a few times a second as stocks change, which made an open dropdown flicker and close. */}
+              <div className="grid flex-1 grid-cols-3 gap-1">
                 {RESOURCES.map((r) => (
-                  <option key={r} value={r} className="bg-slate-900">
-                    {r} (you have {Math.floor(sim.resources[r])})
-                  </option>
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => setResource(r)}
+                    className={`rounded-lg px-2 py-1 text-left text-xs transition ${resource === r ? "bg-sky-400/25 ring-1 ring-sky-300" : "bg-white/5 hover:bg-white/10"}`}
+                  >
+                    <span className="block capitalize">{r}</span>
+                    <span className="block tabular-nums text-white/50">{Math.floor(sim.resources[r])}</span>
+                  </button>
                 ))}
-              </select>
-              <input type="number" min={1} max={10000} value={amount} onChange={(e) => setAmount(Math.max(1, Math.floor(Number(e.target.value)) || 1))} className="w-24 rounded-lg bg-white/10 px-3 py-2 text-sm" />
+              </div>
+              <input type="number" min={1} max={10000} value={amount} onChange={(e) => setAmount(Math.max(1, Math.floor(Number(e.target.value)) || 1))} className="w-20 self-start rounded-lg bg-white/10 px-3 py-2 text-sm" />
             </div>
             {message && <p className="mb-3 text-xs text-sky-200">{message}</p>}
             <div className="space-y-2">
