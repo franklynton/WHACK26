@@ -5,11 +5,9 @@
 // (src/sim/planet.ts) to the LLM routes (/api/narrate, /api/mind).
 import { useCallback, useEffect, useRef, useState } from "react";
 import Globe from "./Globe";
-import Upgrades, { affordableCount } from "./Upgrades";
 import LeaderDialog from "./LeaderDialog";
 import Portrait, { type Mood } from "./Portrait";
 import { ERAS, RACE, type RaceId } from "@/sim/races";
-import { UPGRADES, type UpgradeId } from "@/sim/upgrades";
 import { PLANET_TYPES, PlanetSim, SECONDS_PER_YEAR, type SimEvent } from "@/sim/planet";
 import { fallbackCiv, fallbackLeader, fallbackReaction, fallbackThought, type LeaderReply } from "@/lib/narrator";
 import type { ChronicleEntry, ChronicleKind, Civ, Crisis, LeaderMessage, MindMessage, NationInfo, Needs, PlanetStats, Policy, Relation, World } from "@/types/world";
@@ -33,8 +31,9 @@ const RELATION_STYLE: Record<Relation, { icon: string; cls: string; label: strin
   rival: { icon: "😠", cls: "text-amber-300", label: "rivals" },
   war: { icon: "⚔️", cls: "text-rose-300", label: "at war" },
 };
-const THINK_EVERY_MS = 45_000; // each nation's mind speaks up on its own this often
-const THINK_GAP_MS = 10_000; // but minds take turns, at most one every 10 seconds
+const THINK_EVERY_MS = 75_000; // each nation's mind speaks up on its own this often
+const THINK_GAP_MS = 20_000; // but minds take turns, at most one every 20 seconds
+const NEWS_GAP_MS = 20_000; // the chronicle tells at most one piece of news every 20 seconds
 
 type Entry = ChronicleEntry & { nation?: number };
 type Item = SimEvent & { nation: number }; // a queued event, pinned to the nation that tells it
@@ -48,7 +47,6 @@ interface Hud {
   alert: PlanetSim["alert"];
   output: number;
   military: number;
-  levels: PlanetSim["levels"];
 }
 
 export default function Game({ playerName, planetName = "Arda", race, worldType }: { playerName: string; planetName?: string; race?: RaceId; worldType?: number }) {
@@ -57,6 +55,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
     const seed = worldType == null ? undefined : Math.floor(Math.random() * 2e5) * PLANET_TYPES.length + worldType;
     const s = new PlanetSim(seed);
     s.seedNations(undefined, 10, race); // 3 to 5 nations, far apart; the first is the god's chosen race
+    (globalThis as unknown as { __sim: PlanetSim }).__sim = s;
     return s;
   });
   const count = sim.nations.length;
@@ -69,7 +68,6 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
   const [sel, setSel] = useState(0); // the nation the god is looking at and talking to
   const [busy, setBusy] = useState<"" | "narrating" | "thinking">("");
   const [draft, setDraft] = useState("");
-  const [shop, setShop] = useState(false); // upgrades drawer open
   const [focus, setFocus] = useState<{ face: number; key: number } | null>(null); // where the camera flies to
   const [hover, setHover] = useState<{ id: number; x: number; y: number } | null>(null); // nation under the mouse
   // Audiences with each nation's leader (separate from the people's shared mind).
@@ -93,6 +91,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
   const lastThought = useRef<number[]>(new Array(count).fill(Date.now()));
   const lastAnyThought = useRef(Date.now());
   const answerDue = useRef<number | null>(null); // the god spoke to this nation and it hasn't answered yet
+  const lastNews = useRef(0);
   const lastTold = useRef<Record<string, number>>({}); // year each kind of event was last narrated, per nation
 
   const setCiv = (id: number, civ: Civ) => {
@@ -156,7 +155,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
     if (inFlight.current) return;
     const answer = answerDue.current;
     const genesis = answer == null ? genesisDue.current.shift() : undefined;
-    const next = answer == null && genesis == null ? queue.current.shift() : undefined;
+    const next = answer == null && genesis == null && Date.now() - lastNews.current > NEWS_GAP_MS ? queue.current.shift() : undefined;
     let thinker: number | null = answer;
     if (thinker == null && genesis == null && !next && Date.now() - lastAnyThought.current > THINK_GAP_MS) {
       const ready = sim.nations.filter((n) => n.alive && civsRef.current[n.id] && Date.now() - lastThought.current[n.id] > THINK_EVERY_MS);
@@ -175,6 +174,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
         lastThought.current[genesis] = Date.now() - THINK_EVERY_MS + 15_000; // first words soon after waking
       } else if (next) {
         setBusy("narrating");
+        lastNews.current = Date.now();
         const res = await post<{ civ: Civ; entry: ChronicleEntry }>("/api/narrate", { world: worldFor(next.nation), kind: next.kind, detail: next.detail });
         setCiv(next.nation, res.civ);
         addEntry({ ...res.entry, nation: next.nation });
@@ -227,16 +227,16 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
         // Don't narrate the same kind of thing for the same nation twice in quick succession.
         const big = e.kind === "diplomacy" || e.kind === "captured" || e.kind === "fallen";
         const key = big ? `${e.kind}:${Math.min(nation, e.other ?? nation)}-${Math.max(nation, e.other ?? nation)}` : `${e.kind}:${nation}`;
-        if (e.kind !== "milestone" && sim.year - (lastTold.current[key] ?? -99) < (big ? 8 : 25)) continue;
+        if (e.kind !== "milestone" && sim.year - (lastTold.current[key] ?? -999) < (big ? 25 : 90)) continue;
         lastTold.current[key] = sim.year;
-        if (e.kind === "village" && h.nations[nation].villages > 3) continue; // routine growth
+        if (e.kind === "village" && h.nations[nation].villages > 1) continue; // routine growth
         queue.current.push({ ...e, nation });
       }
       for (const n of h.nations) {
         if (n.crisis && n.crisis !== lastCrisis[n.id] && civsRef.current[n.id]) queue.current.push({ kind: n.crisis, detail: `A ${n.crisis} has begun in ${n.name}.`, nation: n.id });
         lastCrisis[n.id] = n.crisis;
       }
-      queue.current = queue.current.slice(-4); // stay current: drop old news if the LLM falls behind
+      queue.current = queue.current.slice(-2); // stay current: drop old news if the LLM falls behind
       pump();
     }, 300);
     return () => clearInterval(id);
@@ -303,16 +303,6 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
     askLeader(id, history);
   };
 
-  // Buying an upgrade: the people notice the gift and talk about it.
-  const buy = (id: UpgradeId) => {
-    if (!sim.buy(id)) return;
-    const u = UPGRADES.find((x) => x.id === id)!;
-    const text = `The god gave the planet ${u.name.toLowerCase()} (level ${sim.levels[id]}): ${u.effect.toLowerCase()}.`;
-    addEntry({ year: sim.calendar, kind: "milestone", text: `You built ${u.name.toLowerCase()} (level ${sim.levels[id]}). ${u.effect}.` });
-    sim.events.push({ kind: "milestone", detail: text, nation: sel });
-    setHud(readHud(sim));
-  };
-
   const { stats } = hud;
   const civ = civs[sel];
   const me = hud.nations[sel];
@@ -338,7 +328,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
             Weak to {sim.type.weakTo} ({sim.type.weakWhy})
           </p>
           <div className="my-2 flex gap-2">
-            <div className="flex-1 rounded-lg bg-sky-400/15 px-2.5 py-1.5" title="Resources produced per year, weighted by value. Peace, trade and upgrades raise it.">
+            <div className="flex-1 rounded-lg bg-sky-400/15 px-2.5 py-1.5" title="Resources produced per year, weighted by value. Peace and trade raise it.">
               <p className="text-[10px] uppercase tracking-wider text-sky-200/70">Output / yr</p>
               <p className="text-xl font-bold tabular-nums">{hud.output.toLocaleString()}</p>
             </div>
@@ -431,13 +421,6 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
 
       {/* Fate: the latest thing the heavens did, and the controls hint */}
       <div className="pointer-events-none absolute bottom-4 left-[17.5rem] right-[19.5rem] flex flex-col items-center gap-2">
-        {shop && <Upgrades resources={stats.resources} levels={hud.levels} onBuy={buy} onBarter={(f, t, n) => sim.barter(f, t, n) && setHud(readHud(sim))} />}
-        <button onClick={() => setShop((x) => !x)} className="glass pointer-events-auto px-4 py-2 text-sm font-semibold transition hover:bg-white/10">
-          ⬆️ Upgrades
-          {affordableCount(stats.resources, hud.levels) > 0 && (
-            <span className="ml-2 rounded-full bg-sky-400 px-1.5 text-xs text-slate-950">{affordableCount(stats.resources, hud.levels)}</span>
-          )}
-        </button>
         <p className="text-xs text-white/40">Drag to rotate · scroll to zoom · fate decides the weather, you can only talk</p>
       </div>
 
@@ -535,7 +518,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
 
 function readHud(sim: PlanetSim): Hud {
-  return { year: sim.year, stats: sim.stats(), needs: sim.needs(), nations: sim.nationInfo(), fate: sim.fate, alert: sim.alert, output: Math.round(sim.output), military: sim.military(), levels: { ...sim.levels } };
+  return { year: sim.year, stats: sim.stats(), needs: sim.needs(), nations: sim.nationInfo(), fate: sim.fate, alert: sim.alert, output: Math.round(sim.output), military: sim.military() };
 }
 
 // Calls an LLM route. If the server can't be reached (for example the static demo build,

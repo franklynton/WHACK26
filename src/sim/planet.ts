@@ -3,7 +3,6 @@
 // mutated in place for speed; React only polls `snapshot()` a few times a second.
 import * as THREE from "three";
 import { fbm, tileRand } from "./noise";
-import { MAX_LEVEL, UPGRADES, VALUE, canAfford, upgradeCost, type UpgradeId } from "./upgrades";
 import { RACE, RACES, eraOf, ERAS, makeLeader, type Leader, type RaceId } from "./races";
 import type { Crisis, GodPower, NationInfo, Needs, PlanetStats, Policy, Relation, Resources } from "@/types/world";
 
@@ -108,7 +107,11 @@ export type Alert = { icon: string; title: string; text: string; at: number; fac
 
 // The sim runs in fast ticks (one per real second); a calendar year is this many of them.
 export const SECONDS_PER_YEAR = 25;
-export const MIN_NATIONS = 3; // newcomers arrive whenever fewer than this are left
+export const MIN_NATIONS = 3;
+// How much each resource counts towards the planet's output score.
+const VALUE: Resources = { food: 1, wood: 1, stone: 2, metal: 3, gold: 5, herbs: 3 };
+const DISASTER_EVERY = 50; // seconds between natural disasters
+const MINOR_ALERT_GAP = 30; // seconds a routine pop-up waits after the last one // newcomers arrive whenever fewer than this are left
 const MAX_NATIONS = 10; // alive at once (more over time: the fallen make room)
 // Nations after the first five get a neon colour from the golden angle, skipping yellows and greens that blend with land.
 export function nationColor(i: number) {
@@ -200,7 +203,6 @@ export class PlanetSim {
   // Stockpiled resources: the planet's score, and later what it trades with other planets.
   // Production is scaled by stability, so a peaceful planet out-produces a troubled one.
   resources: Resources = { food: 0, wood: 0, stone: 0, metal: 0, gold: 0, herbs: 0 };
-  levels: Record<UpgradeId, number> = { irrigation: 0, stone: 0, medicine: 0, smithing: 0, temples: 0, markets: 0, army: 0 };
   output = 0; // the planet's production per year, in value points (see VALUE): the score
   private produced = 0; // value gathered since the last output sample
   private outputTimer = 0;
@@ -630,7 +632,7 @@ export class PlanetSim {
         if (this.scorch[f] === 0) this.version++;
         continue;
       }
-      const grow = REGROW[this.terrain[f] as T] * (0.4 + this.moisture[f]) * (this.farm[f] ? 2.5 : 1) * (1 + 0.3 * this.levels.irrigation);
+      const grow = REGROW[this.terrain[f] as T] * (0.4 + this.moisture[f]) * (this.farm[f] ? 2.5 : 1);
       this.food[f] = Math.min(1, this.food[f] + grow * dt);
     }
   }
@@ -666,28 +668,27 @@ export class PlanetSim {
       // Villagers gather for the stockpile: surplus food, wood from forests, stone from mountains.
       // A stable nation works harder, and every trading partner adds a quarter more.
       if (home) {
-        const peace = (0.5 + nt.stability / 100) * (1 + (0.25 + 0.15 * this.levels.markets) * this.tradePartners(p.nation));
-        const tools = 1 + 0.3 * this.levels.smithing;
+        const peace = (0.5 + nt.stability / 100) * (1 + 0.25 * this.tradePartners(p.nation));
         const ry = (r: keyof Resources) => (race.yield[r] ?? 1) * this.homeBonus(p.nation); // what this race is good at
         const t = this.terrain[p.face] as T;
         if (p.hunger > 0.9 && this.food[p.face] > 0.2) {
           this.food[p.face] -= 0.1;
-          this.gain("food", 0.1 * peace * this.type.yield.food * ry("food") * (1 + 0.3 * this.levels.irrigation));
+          this.gain("food", 0.1 * peace * this.type.yield.food * ry("food"));
         }
         const y = this.type.yield;
         if (t === T.Forest) {
-          this.gain("wood", 0.03 * peace * y.wood * ry("wood") * tools);
+          this.gain("wood", 0.03 * peace * y.wood * ry("wood"));
           // Logging: woodcutters slowly clear the forest near home, felling the tile for a big haul.
           if (this.angle(p.face, home.face) < 0.09 && Math.random() < 0.06) {
             this.forest[p.face] = 0;
             this.classify(p.face);
-            this.gain("wood", 0.6 * y.wood * ry("wood") * tools);
+            this.gain("wood", 0.6 * y.wood * ry("wood"));
             this.version++;
           }
         }
         if (t === T.Rock) {
-          this.gain("stone", 0.05 * peace * y.stone * ry("stone") * tools);
-          this.gain("metal", 0.02 * peace * y.metal * ry("metal") * tools); // ore from the mountainside
+          this.gain("stone", 0.05 * peace * y.stone * ry("stone"));
+          this.gain("metal", 0.02 * peace * y.metal * ry("metal")); // ore from the mountainside
         }
         if (t === T.Forest) this.gain("herbs", 0.006 * peace * y.herbs * ry("herbs")); // medicinal plants from the woods
         if (this.deposit[p.face] === D.Gold) this.gain("gold", 0.03 * peace * y.gold * ry("gold"));
@@ -765,7 +766,7 @@ export class PlanetSim {
       }
     }
     this.people = this.people.filter((p) => {
-      if (p.hunger > 0 && p.age < 55 + this.race(p.nation).lifespan + (p.id % 25) + Math.min(20, this.resources.herbs / 20) + 8 * this.levels.medicine) return true;
+      if (p.hunger > 0 && p.age < 55 + this.race(p.nation).lifespan + (p.id % 25) + Math.min(20, this.resources.herbs / 20)) return true;
       if (p.hunger > -1) this.nations[p.nation].recentDeaths++; // war deaths were counted already
       return false;
     });
@@ -855,7 +856,7 @@ export class PlanetSim {
     v.tier = next as 1 | 2;
     const where = this.nationName(v.nation);
     this.events.push({ kind: "milestone", detail: `${v.name} in ${where} has grown into a ${TIER_NAME[next]}.`, nation: v.nation });
-    this.announce(next === 2 ? "🏙️" : "🏘️", next === 2 ? "A new city!" : "A new town", `${v.name} in ${where} has grown into a ${TIER_NAME[next]}.`, v.face);
+    this.announce(next === 2 ? "🏙️" : "🏘️", next === 2 ? "A new city!" : "A new town", `${v.name} in ${where} has grown into a ${TIER_NAME[next]}.`, v.face, true);
   }
 
   private stepVillages(dt: number) {
@@ -1072,7 +1073,7 @@ export class PlanetSim {
       const id = this.addNation();
       for (let j = 0; j < 10; j++) this.spawnNear(home, id);
       this.events.push({ kind: "village", detail: `Wanderers arrive from beyond the sea and settle near the coast.`, nation: id });
-      this.announce("⛵", "Newcomers", `A new people, ${this.nationName(id)}, arrive and settle on empty land.`, home);
+      this.announce("⛵", "Newcomers", `A new people, ${this.nationName(id)}, arrive and settle on empty land.`, home, true);
     }
 
     // Land that has been cut off from the capital (by war or disaster) can't stay part of the nation.
@@ -1187,7 +1188,7 @@ export class PlanetSim {
         const rel = this.relation[a][b];
         const touching = this.contact[a][b] > 0;
         let drift: number;
-        if (rel === "war") drift = -1 - 0.5 * this.levels.army; // war exhausts both sides; an army ends it sooner
+        if (rel === "war") drift = -1; // war exhausts both sides
         else {
           // Tension drifts towards a level set by what is going on between them.
           let level = 40 + 18 * Math.sin(this.year / 40 + a * 7.1 + b * 3.3); // old grudges come and go
@@ -1197,7 +1198,7 @@ export class PlanetSim {
           // Envy: a much bigger neighbour makes the smaller one nervous.
           const pa = this.people.filter((p) => p.nation === a).length, pb = this.people.filter((p) => p.nation === b).length;
           if (Math.max(pa, pb) > 2 * Math.max(1, Math.min(pa, pb))) level += 8;
-          if (rel === "trade") level -= 10 + 4 * this.levels.markets;
+          if (rel === "trade") level -= 10;
           drift = (level - this.tension[a][b]) * 0.04;
         }
         this.sway(a, b, drift * dt);
@@ -1241,7 +1242,7 @@ export class PlanetSim {
       nt.recentDeaths *= Math.pow(0.85, dt); // fades over a few seconds
       const wars = this.relation[nt.id].filter((r) => r === "war").length;
       const target =
-        (nt.policy === "worship" ? 50 : 40) + Math.min(30, mine.length * 4) + (food - 50) * 0.4 - Math.min(40, nt.recentDeaths * 1.5) - wars * 15 + this.tradePartners(nt.id) * 5 + 6 * this.levels.stone + RACE[nt.race].stability;
+        (nt.policy === "worship" ? 50 : 40) + Math.min(30, mine.length * 4) + (food - 50) * 0.4 - Math.min(40, nt.recentDeaths * 1.5) - wars * 15 + this.tradePartners(nt.id) * 5 + RACE[nt.race].stability;
       nt.stability = Math.max(0, Math.min(100, nt.stability + (target - nt.stability) * 0.15 * dt));
       this.stepTech(nt, mine.length, dt);
     }
@@ -1260,7 +1261,7 @@ export class PlanetSim {
       const text = space ? `${cap(nt.name)} have reached the Space Age! Their first ship leaves the planet.` : `${cap(nt.name)} enter the ${ERAS[after]}.`;
       this.events.push({ kind: "milestone", detail: text, nation: nt.id });
       const home = this.nationHome(nt.id);
-      if (home != null) this.announce(space ? "🚀" : "📜", space ? "The Space Age" : `The ${ERAS[after]}`, text, home);
+      if (home != null) this.announce(space ? "🚀" : "📜", space ? "The Space Age" : `The ${ERAS[after]}`, text, home, true);
     }
   }
 
@@ -1269,16 +1270,16 @@ export class PlanetSim {
   // ---- Fate ----
   // The player can't use powers directly: the heavens use them at random, and the
   // people believe their god did it. The player's only influence is talking to them.
-  private nextFate = 8 + Math.random() * 8;
+  private nextFate = 20 + Math.random() * 15;
   fate: { power: GodPower; text: string; at: number } | null = null; // the latest act, for the HUD
 
   private maybeFate(dt: number) {
     this.nextFate -= dt;
     if (this.nextFate > 0 || !this.people.length) return;
-    this.nextFate = 12 + Math.random() * 18;
+    this.nextFate = 40 + Math.random() * 30;
     const bag: [GodPower, number][] = [
       ["rain", 3], ["forest", 2], ["miracle", 2], ["peace", 2], ["drought", 2], ["discord", 2],
-      ["raise", 1], ["lower", 1], ["fire", 1], ["meteor", 1],
+      ["raise", 1], ["lower", 1], ["fire", 1],
     ];
     let r = Math.random() * bag.reduce((t, [, w]) => t + w, 0);
     const power = bag.find(([, w]) => (r -= w) < 0)![0];
@@ -1298,7 +1299,7 @@ export class PlanetSim {
     };
     if (power === "rain") this.addWeather(target, false); // a visible rain cloud over the spot
     this.fate = { power, text: words[power], at: this.year };
-    if (power !== "meteor") this.announce(FATE_ICONS[power], FATE_TITLES[power], words[power], target);
+    if (power !== "meteor") this.announce(FATE_ICONS[power], FATE_TITLES[power], words[power], target, true);
     this.events.push({ kind: power, detail: `${words[power]} The people believe their god did it.`, nation });
   }
 
@@ -1309,7 +1310,9 @@ export class PlanetSim {
   volcanoes: Volcano[] = [];
   alert: Alert | null = null;
 
-  private announce(icon: string, title: string, text: string, face: number) {
+  // Pop-ups: big news always shows; routine news (towns, eras, newcomers) only if nothing has popped up for a while.
+  private announce(icon: string, title: string, text: string, face: number, minor = false) {
+    if (minor && this.alert && this.year - this.alert.at < MINOR_ALERT_GAP) return;
     this.alert = { icon, title, text, at: this.year, face };
   }
 
@@ -1405,7 +1408,14 @@ export class PlanetSim {
     // Volcanoes: bursts of lava set the slopes alight and bury the land in ash.
     for (const v of this.volcanoes) {
       if (!v.active) {
-        if (this.year >= v.wakeAt) this.erupt(v);
+        if (this.year >= v.wakeAt) {
+          // Only erupt on its own if no other disaster is due soon; otherwise wait for a quiet spell.
+          if (this.nextDisaster > DISASTER_EVERY / 2 && this.year - this.lastDisasterAt > DISASTER_EVERY * 0.8) {
+            this.erupt(v);
+            this.lastDisasterAt = this.year;
+            this.nextDisaster = DISASTER_EVERY;
+          } else v.wakeAt = this.year + 30 + Math.random() * 30;
+        }
         continue;
       }
       if (this.year - v.at >= v.life) {
@@ -1435,7 +1445,7 @@ export class PlanetSim {
   private nextWeather = 2 + Math.random() * 4;
 
   // Start a rain cloud (or a storm) over `face`, drifting along a random great circle.
-  addWeather(face: number, storm: boolean) {
+  addWeather(face: number, storm: boolean, loud = false) {
     if (this.weather.length >= MAX_WEATHER) this.weather.shift();
     const pos = this.c(face);
     const axis = new THREE.Vector3().randomDirection().cross(new THREE.Vector3(...pos)).normalize();
@@ -1445,6 +1455,7 @@ export class PlanetSim {
       rainTimer: 0, nextStrike: 1 + Math.random() * 2, flash: null,
     });
     const nation = this.owner[face];
+    if (!loud) return; // passing weather is just scenery
     if (storm) this.announce("⛈️", "Storm!", `A thunderstorm is building over ${this.where(face)}.`, face);
     if (storm && nation >= 0) this.events.push({ kind: "disaster", detail: `A great storm rolls over ${this.nationName(nation)}.`, nation });
   }
@@ -1455,7 +1466,7 @@ export class PlanetSim {
       this.nextWeather = 3 + Math.random() * 6;
       const nearPeople = this.people.length && Math.random() < 0.6;
       const face = nearPeople ? this.people[Math.floor(Math.random() * this.people.length)].face : Math.floor(Math.random() * this.n);
-      this.addWeather(face, Math.random() < 0.3);
+      this.addWeather(face, Math.random() < 0.12);
     }
     const v = new THREE.Vector3(), ax = new THREE.Vector3();
     for (const w of this.weather) {
@@ -1521,12 +1532,14 @@ export class PlanetSim {
     if (changed) this.version++;
   }
 
-  private nextDisaster = 15 + Math.random() * 15; // years until the next one
+  private lastDisasterAt = -99;
+  private nextDisaster = DISASTER_EVERY * (0.6 + Math.random() * 0.4); // seconds until the next one
 
   private maybeDisaster(dt: number) {
     this.nextDisaster -= dt;
     if (this.nextDisaster > 0 || this.people.length < 20) return;
-    this.nextDisaster = 20 + Math.random() * 25;
+    this.nextDisaster = DISASTER_EVERY * (0.9 + Math.random() * 0.2);
+    this.lastDisasterAt = this.year;
     // Usually aim near people, so the disaster matters.
     const target = this.people.length && Math.random() < 0.75 ? this.people[Math.floor(Math.random() * this.people.length)].face : Math.floor(Math.random() * this.n);
     // Each planet type suffers its own hazard far more often (volcanoes on Ironworld, tsunamis on Archipelago...).
@@ -1539,7 +1552,7 @@ export class PlanetSim {
     let kind: string;
     if (roll < 0.5) {
       kind = "lightning storm";
-      this.addWeather(target, true);
+      this.addWeather(target, true, true);
       this.ignite(target);
       for (let k = 0; k < 3; k++) this.ignite(this.neighbours[target * 3 + k]);
     } else if (roll < 0.66) {
@@ -1555,7 +1568,7 @@ export class PlanetSim {
         this.elevation[f] = Math.max(-1, Math.min(1, this.elevation[f] + (Math.random() - 0.5) * 0.25 * w));
         this.classify(f);
       }
-      this.villages = this.villages.filter((v) => this.angle(v.face, target) > 0.05 || Math.random() < 0.5 + 0.15 * this.levels.stone);
+      this.villages = this.villages.filter((v) => this.angle(v.face, target) > 0.05 || Math.random() < 0.5);
       this.killWhere((p) => isWater(this.terrain[p.face] as T));
     } else if (roll < 0.93) {
       kind = "flood";
@@ -1568,7 +1581,7 @@ export class PlanetSim {
     } else {
       kind = "plague";
       // Stockpiled herbs are medicine: they protect against plague.
-      const medicine = 1 - (1 - Math.min(0.8, this.resources.herbs / 200)) * Math.pow(0.5, this.levels.medicine);
+      const medicine = 1 - (1 - Math.min(0.8, this.resources.herbs / 200));
       this.killWhere((p) => this.angle(p.face, target) < 0.25 && Math.random() < 0.5 * (1 - medicine));
     }
     const dead = before - this.people.length;
@@ -1667,30 +1680,7 @@ export class PlanetSim {
   // Military strength (for invading other planets later): trained soldiers plus their weapons.
   military() {
     const adults = this.people.filter((p) => p.age > 16 && p.age < 50).length;
-    return Math.round(this.levels.army * 10 + (adults * this.levels.army) / 4 + Math.min(30, this.resources.metal / 20));
-  }
-
-  // Spend resources on the next level of an upgrade. Returns false if it can't be bought.
-  buy(id: UpgradeId): boolean {
-    const u = UPGRADES.find((x) => x.id === id)!;
-    const level = this.levels[id];
-    const cost = upgradeCost(u, level);
-    if (level >= MAX_LEVEL || !canAfford(this.resources, cost)) return false;
-    for (const [r, n] of Object.entries(cost)) this.resources[r as keyof Resources] -= n as number;
-    this.levels[id] = level + 1;
-    for (const nt of this.nations) if (nt.alive) nt.faith = Math.min(100, nt.faith + 5); // a gift from their god
-    return true;
-  }
-
-  // Swap resources with travelling merchants at a poor rate (half the value is lost).
-  // Trading with other players' planets will be the better deal.
-  barter(from: keyof Resources, to: keyof Resources, amount: number): number {
-    if (from === to || this.resources[from] < amount) return 0;
-    const got = Math.floor((amount * VALUE[from] * 0.5) / VALUE[to]);
-    if (got <= 0) return 0;
-    this.resources[from] -= amount;
-    this.resources[to] += got;
-    return got;
+    return Math.round(adults / 4 + Math.min(30, this.resources.metal / 20));
   }
 
   stats(): PlanetStats {
