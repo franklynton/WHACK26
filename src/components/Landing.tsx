@@ -35,6 +35,8 @@ export default function Landing({ onStart }: { onStart: (playerName: string) => 
     <main className="starfield relative min-h-dvh w-full overflow-x-hidden">
       <div className="planet-orb" aria-hidden />
       <section className="relative mx-auto flex max-w-5xl flex-col items-center px-6 pt-24 text-center">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/arda-logo.svg" alt="" className="mb-6 h-24 w-24 drop-shadow-[0_0_30px_rgba(95,212,255,0.45)]" />
         <p className="label mb-4">A god game for one tiny world</p>
         <h1 className="text-7xl font-bold tracking-tight sm:text-8xl">Arda</h1>
         <p className="mt-5 max-w-xl text-lg text-white/70">
