@@ -66,8 +66,8 @@ export interface Nation {
   alive: boolean;
 }
 
-export const NATION_COLORS = ["#e63946", "#ffd166", "#b56cff", "#ff70a6", "#ff8c42"];
-const NATION_HUES = ["Red", "Gold", "Violet", "Rose", "Amber"]; // placeholder names until each mind names itself
+export const NATION_COLORS = ["#ff2bd6", "#00f0ff", "#a24dff", "#ff1f4b", "#ff7a00"]; // neon, so borders pop against the terrain
+const NATION_HUES = ["Rose", "Azure", "Violet", "Crimson", "Ember"]; // placeholder names until each mind names itself
 
 // Something the narrator might want to talk about.
 export interface SimEvent {
