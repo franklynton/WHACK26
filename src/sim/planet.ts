@@ -3,7 +3,7 @@
 // mutated in place for speed; React only polls `snapshot()` a few times a second.
 import * as THREE from "three";
 import { fbm, tileRand } from "./noise";
-import { RACE, RACES, eraOf, ERAS, makeLeader, type Leader, type RaceId } from "./races";
+import { RACE, RACES, eraOf, ERAS, ERA_AT, makeLeader, type Leader, type RaceId } from "./races";
 import type { Crisis, GodPower, NationInfo, Needs, PlanetStats, Policy, Relation, Resources } from "@/types/world";
 
 export const DETAIL = 36; // tiles = 20 * (DETAIL + 1)^2
@@ -1073,6 +1073,20 @@ export class PlanetSim {
   choice: Choice | null = null;
   outcome: { won: boolean; title: string; text: string } | null = null;
   spacefaring = false; // your nation has reached the Space Age, which unlocks the galaxy (multiplayer)
+  // Demo mode is a speedrun of the real game: the clock runs `pace` times faster (prayers and choices
+  // still give you the same real seconds to answer) and the eras climb faster on top of that.
+  pace = 1;
+  techBoost = 1;
+  startDemo() {
+    this.pace = 3;
+    this.techBoost = 2;
+  }
+
+  // Demo shortcut: put your nation on the edge of the Space Age, so the next tick launches it (and unlocks the galaxy).
+  skipToSpace() {
+    const mine = this.nations[0];
+    if (mine?.alive) mine.tech = Math.max(mine.tech, ERA_AT[ERA_AT.length - 1] - 0.01);
+  }
   private nextPrayer = 25;
 
   loveOf(id: number) {
@@ -1102,12 +1116,12 @@ export class PlanetSim {
       const nt = askers[Math.floor(Math.random() * askers.length)];
       if (nt) this.prayers.push(this.makePrayer(nt));
     }
-    for (const p of this.prayers) if (this.year - p.at > PRAYER_LIFE) {
+    for (const p of this.prayers) if (this.year - p.at > PRAYER_LIFE * this.pace) {
       this.adore(p.nation, -8);
       this.events.push({ kind: "drought", detail: `${cap(this.nationName(p.nation))} prayed to their god and heard nothing. They feel abandoned.`, nation: p.nation });
     }
-    this.prayers = this.prayers.filter((p) => this.year - p.at <= PRAYER_LIFE && this.nations[p.nation]?.alive);
-    if (this.choice && this.year - this.choice.at > CHOICE_LIFE) this.decide(false);
+    this.prayers = this.prayers.filter((p) => this.year - p.at <= PRAYER_LIFE * this.pace && this.nations[p.nation]?.alive);
+    if (this.choice && this.year - this.choice.at > CHOICE_LIFE * this.pace) this.decide(false);
     this.checkGoal();
   }
 
@@ -1782,7 +1796,7 @@ export class PlanetSim {
     if (!villages) return;
     const pop = this.people.filter((p) => p.nation === nt.id).length;
     const before = eraOf(nt.tech);
-    nt.tech += Math.sqrt(pop) * (0.5 + nt.stability / 100) * 0.35 * RACE[nt.race].tech * dt;
+    nt.tech += Math.sqrt(pop) * (0.5 + nt.stability / 100) * 0.35 * RACE[nt.race].tech * this.techBoost * dt;
     const after = eraOf(nt.tech);
     if (after > before) {
       const space = after === ERAS.length - 1;

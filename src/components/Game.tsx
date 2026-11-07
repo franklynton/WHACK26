@@ -49,7 +49,7 @@ interface Hud {
   god: { devotion: number; ready: PlanetSim["ready"]; prayers: PlanetSim["prayers"]; spacefaring: boolean; choice: PlanetSim["choice"]; outcome: PlanetSim["outcome"]; avgLove: number };
 }
 
-export default function Game({ playerName, planetName = "Arda", race, worldType, resume, onNewPlanet }: { playerName: string; planetName?: string; race?: RaceId; worldType?: number; resume?: Save; onNewPlanet?: () => void }) {
+export default function Game({ playerName, planetName = "Arda", race, worldType, demo, resume, onNewPlanet }: { playerName: string; planetName?: string; race?: RaceId; worldType?: number; demo?: boolean; resume?: Save; onNewPlanet?: () => void }) {
   const [sim] = useState(() => {
     if (resume) {
       try {
@@ -62,6 +62,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
     const seed = worldType == null ? undefined : Math.floor(Math.random() * 2e5) * PLANET_TYPES.length + worldType;
     const s = new PlanetSim(seed);
     s.seedNations(undefined, 10, race); // 3 to 5 nations, far apart; the first is the god's chosen race
+    if (demo) s.startDemo();
     return s;
   });
   const count = sim.nations.length;
@@ -147,7 +148,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
   useEffect(() => {
     const save = () =>
       saveGame({
-        meta: { playerName, planetName, race },
+        meta: { playerName, planetName, race, demo },
         ui: { civs: civsRef.current, chats: chatsRef.current, leaderChats: leaderChatsRef.current, chronicle: chronicleRef.current, ...latest.current },
         sim: sim.toSave(),
         at: Date.now(),
@@ -158,7 +159,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
       clearInterval(id);
       window.removeEventListener("pagehide", save);
     };
-  }, [sim, playerName, planetName, race]);
+  }, [sim, playerName, planetName, race, demo]);
 
   const setCiv = (id: number, civ: Civ) => {
     const next = [...civsRef.current];
@@ -388,7 +389,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
   return (
     <main className="relative h-dvh w-full overflow-hidden select-none">
       <div className="absolute inset-0 isolate">
-        <Globe sim={sim} tool={miracle ? MIRACLES.find((m) => m.id === miracle)!.tool : "hand"} speed={1} onPaint={(_, face) => cast(face)} onHover={hoverAt} focus={focus} />
+        <Globe sim={sim} tool={miracle ? MIRACLES.find((m) => m.id === miracle)!.tool : "hand"} speed={sim.pace} onPaint={(_, face) => cast(face)} onHover={hoverAt} focus={focus} />
       </div>
 
       {/* The planet and its nations */}
@@ -396,6 +397,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
         <div>
           <p className="label">
             Year {Math.floor(hud.year / SECONDS_PER_YEAR)} · God: {playerName}
+            {demo && <span className="ml-1.5 rounded bg-indigo-400/25 px-1.5 py-0.5 text-[10px] font-bold text-indigo-100">DEMO {sim.pace}x</span>}
           </p>
           <p className="truncate text-2xl font-semibold" title={planetName}>{planetName}</p>
           <p className="text-xs text-white/55">
@@ -483,11 +485,20 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
         <div className="mt-auto flex items-end justify-center gap-2">
           {onNewPlanet && (
             <button
-              onClick={() => confirm("Start over on a new planet? This planet will be lost.") && onNewPlanet()}
+              onClick={() => (demo || confirm("Start over on a new planet? This planet will be lost.")) && onNewPlanet()}
               className="rounded-lg bg-white/5 px-2.5 py-1 text-xs text-white/60 transition hover:bg-white/10 hover:text-white"
-              title="Your planet saves automatically in this browser"
+              title={demo ? "Leave the demo and go back to your own planet" : "Your planet saves automatically in this browser"}
             >
-              New planet
+              {demo ? "Exit demo" : "New planet"}
+            </button>
+          )}
+          {demo && !hud.god.spacefaring && (
+            <button
+              onClick={() => sim.skipToSpace()}
+              className="rounded-lg bg-indigo-400/15 px-2.5 py-1 text-xs text-indigo-200 transition hover:bg-indigo-400/30"
+              title="Demo shortcut: your nation reaches the Space Age now"
+            >
+              🚀 Skip to space
             </button>
           )}
           <button
@@ -531,7 +542,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
         {hud.god.choice && (
           <ChoiceCard
             choice={hud.god.choice}
-            left={CHOICE_LIFE - (hud.year - hud.god.choice.at)}
+            left={CHOICE_LIFE - (hud.year - hud.god.choice.at) / sim.pace}
             devotion={hud.god.devotion}
             names={hud.nations}
             onPick={(yes) => {
@@ -545,7 +556,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
           <div key={p.id} className="glass pointer-events-auto relative flex w-[30rem] max-w-full items-center gap-3 overflow-hidden px-4 py-2.5 text-sm">
             <span className="text-xl">🙏</span>
             <span className="flex-1">{cap(p.text)}</span>
-            <Countdown left={PRAYER_LIFE - (hud.year - p.at)} life={PRAYER_LIFE} />
+            <Countdown left={PRAYER_LIFE - (hud.year - p.at) / sim.pace} life={PRAYER_LIFE} />
             <button
               disabled={hud.god.devotion < p.cost}
               onClick={() => {

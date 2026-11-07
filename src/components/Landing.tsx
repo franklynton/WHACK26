@@ -24,11 +24,12 @@ function saved(key: string) {
   }
 }
 
-export default function Landing({ onStart }: { onStart: (playerName: string, planetName: string, race: RaceId, worldType: number | undefined) => void }) {
+export default function Landing({ onStart }: { onStart: (playerName: string, planetName: string, race: RaceId, worldType: number | undefined, demo: boolean) => void }) {
   const [name, setName] = useState(() => saved(NAME_KEY));
   const [planet, setPlanet] = useState(() => saved(PLANET_KEY));
   const [race, setRace] = useState<RaceId>("human");
   const [world, setWorld] = useState<number | undefined>(undefined); // undefined = random
+  const [demo, setDemo] = useState(false); // a speedrun of the real game, for presentations
 
   const start = (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,7 +39,7 @@ export default function Landing({ onStart }: { onStart: (playerName: string, pla
       localStorage.setItem(NAME_KEY, n);
       localStorage.setItem(PLANET_KEY, pl);
     } catch {}
-    onStart(n, pl, race, world);
+    onStart(n, pl, race, world, demo);
   };
 
   return (
@@ -110,12 +111,27 @@ export default function Landing({ onStart }: { onStart: (playerName: string, pla
               </button>
             ))}
           </div>
+          <p className="label mt-1">Mode</p>
+          <div className="grid grid-cols-2 gap-1.5">
+            {[false, true].map((d) => (
+              <button
+                type="button"
+                key={String(d)}
+                onClick={() => setDemo(d)}
+                className={`rounded-lg px-3 py-2 text-left transition ${demo === d ? "bg-sky-400/25 ring-1 ring-sky-300" : "bg-white/5 hover:bg-white/10"}`}
+              >
+                <span className="block text-sm font-semibold">{d ? "🎬 Demo" : "🌍 Full game"}</span>
+                <span className="block text-xs text-white/55">{d ? "A speedrun: 3x speed, Space Age in minutes" : "Real pace, saved in this browser"}</span>
+              </button>
+            ))}
+          </div>
+          {demo && <p className="text-xs text-white/55">For presentations. The same game at triple speed, with faster eras and a button to skip to space. It saves separately, so your real planet is untouched.</p>}
           {world != null && (
             <p className="text-xs text-white/55">
               {PLANET_TYPES[world].blurb}. Prone to {PLANET_TYPES[world].hazard}s. Weak to {PLANET_TYPES[world].weakTo}: {PLANET_TYPES[world].weakWhy}.
             </p>
           )}
-          <button className="mt-1 rounded-lg bg-sky-400 px-4 py-2.5 font-semibold text-slate-950 transition hover:bg-sky-300">Create your planet</button>
+          <button className="mt-1 rounded-lg bg-sky-400 px-4 py-2.5 font-semibold text-slate-950 transition hover:bg-sky-300">{demo ? "Start the demo" : "Create your planet"}</button>
           <p className="text-xs text-white/40">Reach the Space Age to travel to other gods&apos; planets, to trade with or invade.</p>
         </form>
       </section>
