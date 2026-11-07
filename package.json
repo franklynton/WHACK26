@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "demo": "next build && mkdir -p demo && npx -y esbuild@0.24.2 src/standalone.tsx --bundle --minify --format=iife --target=es2020 --outfile=demo/game.js --alias:@=./src --define:process.env.NODE_ENV='\"production\"' --jsx=automatic && node scripts/demo-html.mjs"
   },
   "dependencies": {
     "@react-three/drei": "10.7.9",
