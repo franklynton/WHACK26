@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PlanetSim } from "@/sim/planet";
 import type { Resources } from "@/types/world";
+import { IncomingOffers, OffersTab, useTradeOffers } from "./TradeOffers";
 import { CODE_RULE, GALAXY_MAX, cleanCode, joinError, setWantedGalaxy, typeCode, wantedGalaxy } from "@/lib/galaxyCode";
 
 // Multiplayer: every planet syncs a snapshot to Supabase (through /api/galaxy) every few seconds.
@@ -119,12 +120,13 @@ export interface GalaxyStatus {
 
 export default function Galaxy({
   sim, ownerName, planetName, demo, spacefaring, open, view = null, onClose, onStatus,
-}: { sim: PlanetSim; ownerName: string; planetName: string; demo?: boolean; spacefaring: boolean; open: boolean; view?: "market" | "invade" | "join" | null; onClose: () => void; onStatus?: (s: GalaxyStatus) => void }) {
+}: { sim: PlanetSim; ownerName: string; planetName: string; demo?: boolean; spacefaring: boolean; open: boolean; view?: "market" | "invade" | "offers" | "join" | null; onClose: () => void; onStatus?: (s: GalaxyStatus) => void }) {
   const since = useRef<number | null>(null);
   const names = useRef(new Map<string, string>());
   const wanted = useRef<string | null>(null); // the galaxy we mean to be in (kept in the browser, so a refresh rejoins it)
   const joining = useRef(false);
   const syncInFlight = useRef<Promise<boolean> | null>(null);
+  const deltas = useRef(true); // false while the database is older than migration 008 (then its totals mustn't be adopted)
   const seen = useRef<{ galaxy: string | null; gods: Map<string, PlanetRow> } | null>(null); // to announce arrivals and departures
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [rooms, setRooms] = useState(true); // false until migration 003 is run: then everyone online shares one galaxy
@@ -134,8 +136,6 @@ export default function Galaxy({
   const [switching, setSwitching] = useState(false); // the "Switch galaxy" code box is open
   const [aloneLocal, setAloneLocal] = useState(false); // before migration 003 there are no rooms, so "Play alone" is kept here
   const [error, setError] = useState(""); // a join that failed, shown under the code box like a form error
-  const [resource, setResource] = useState<keyof Resources>("gold");
-  const [amount, setAmount] = useState(10);
   const [message, setMessage] = useState("");
   const [marketOrders, setMarketOrders] = useState<MarketOrder[]>([]);
   const [marketTrades, setMarketTrades] = useState<MarketTrade[]>([]);
@@ -144,14 +144,14 @@ export default function Galaxy({
   const [marketPrice, setMarketPrice] = useState(10);
   const [marketQuantity, setMarketQuantity] = useState(10);
   const [credits, setCredits] = useState(1000);
-  const [marketOpen, setMarketOpen] = useState(false);
+  const [tab, setTab] = useState<"invade" | "market" | "offers">("invade");
+  const marketOpen = tab === "market";
   const [marketPrices, setMarketPrices] = useState<MarketPrice[]>([]);
   const [marketHistory, setMarketHistory] = useState<MarketPricePoint[]>([]);
 
   useEffect(() => {
     if (!open) return;
-    if (view === "market") setMarketOpen(true);
-    if (view === "invade") setMarketOpen(false);
+    if (view === "market" || view === "invade" || view === "offers") setTab(view);
   }, [open, view]);
 
   // This planet's id and the secret token that owns its row. The demo is a separate planet, so it gets its own.
@@ -227,10 +227,12 @@ export default function Galaxy({
       setMarketTrades((data.trades ?? []) as MarketTrade[]);
       setMarketPrices((data.prices ?? []) as MarketPrice[]);
       setMarketHistory((data.history ?? []) as MarketPricePoint[]);
-      const me = data.me as { credits?: number; resources?: Record<string, number> } | null;
+      // Credits live only in the database. Resources reach the game through the sync (migration 008),
+      // so the market never overwrites what the planet has produced since.
+      const me = data.me as { credits?: number } | null;
       if (me?.credits != null) {
         setCredits(Number(me.credits));
-        sim.marketSync((me.resources ?? sim.stats().resources) as Resources, Number(me.credits));
+        sim.marketCredits = Math.max(0, Math.floor(Number(me.credits)));
       }
     } catch {}
   }, [ids, sim]);
@@ -269,15 +271,24 @@ export default function Galaxy({
     const request = (async () => {
       const s = sim.stats();
       const hash = [...ids.world].reduce((n, c) => (n * 31 + c.charCodeAt(0)) | 0, 7);
+      // Send what changed since the database last confirmed our totals; it sends back the true totals,
+      // which include market fills, trade offers and invasion loot settled there.
+      const snap = sim.galaxySnapshot();
       try {
-        const { res } = await post({
+        const { res, data } = await post({
           action: "sync", ownerName, planetName, planetType: s.planetType,
-          population: s.population, villages: s.villages, output: Math.round(sim.output), military: sim.military(), resources: s.resources,
+          population: s.population, villages: s.villages, output: Math.round(sim.output), military: sim.military(),
+          resources: snap.sent, delta: deltas.current ? snap.delta : null,
           positionX: (hash & 0xffff) / 0xffff, positionY: ((hash >>> 16) & 0xffff) / 0xffff,
         });
         if (res.status === 503) {
           setEnabled(false);
           return false;
+        }
+        deltas.current = data.deltas !== false;
+        if (res.ok && deltas.current && data.planet?.resources) {
+          sim.galaxyAdopt(data.planet.resources, snap.sent, data.planet.credits);
+          if (data.planet.credits != null) setCredits(Number(data.planet.credits));
         }
         await load();
         return res.ok;
@@ -294,6 +305,9 @@ export default function Galaxy({
     return request;
   }, [sim, ownerName, planetName, load, post, ids]);
 
+  // Trade offers with the other gods in our galaxy (TradeOffers.tsx).
+  const offers = useTradeOffers({ worldId: ids.world, post, sync, sim, active: !!(enabled && rooms && galaxy) });
+
   useEffect(() => {
     wanted.current = wantedGalaxy(); // from the landing page, a shared link, or last time
     sync();
@@ -309,7 +323,7 @@ export default function Galaxy({
   }, [marketOpen, galaxy, loadMarket]);
 
   useEffect(() => {
-    if (!open) setMarketOpen(false);
+    if (!open) setTab("invade");
   }, [open]);
 
   // The HUD shows whether we're connected, which galaxy we're in and how full it is.
@@ -324,7 +338,7 @@ export default function Galaxy({
     setWantedGalaxy(null);
     setGalaxy(null);
     setPlanets([]);
-    setMarketOpen(false);
+    setTab("invade");
     seen.current = null;
     try {
       await post({ action: "leave" });
@@ -335,6 +349,7 @@ export default function Galaxy({
 
   const placeMarketOrder = async () => {
     if (!galaxy) return setMessage("Join a galaxy before placing an order.");
+    await sync(); // so the database knows what we hold right now
     const { data } = await post({
       action: "place_order",
       side: marketSide,
@@ -343,12 +358,14 @@ export default function Galaxy({
       quantity: marketQuantity,
     });
     setMessage(data.error || `Order ${data.status ?? "placed"}${data.remaining != null ? ` (${data.remaining} remaining)` : ""}`);
+    await sync(); // brings the held goods and any fill into the game
     await loadMarket();
   };
 
   const cancelMarketOrder = async (orderId: number) => {
     const { data } = await post({ action: "cancel_order", orderId });
     setMessage(data.error || "Order cancelled.");
+    await sync(); // the refund
     await loadMarket();
   };
 
@@ -386,12 +403,11 @@ export default function Galaxy({
   };
 
 
-  const act = async (action: "trade" | "invasion", target: string) => {
-    if (alone) return setMessage("You're playing alone. Join a galaxy to trade or invade.");
-    if (action === "trade" && sim.resources[resource] < amount) return setMessage(`You only have ${Math.floor(sim.resources[resource])} ${resource}.`);
+  const invade = async (target: string) => {
+    if (alone) return setMessage("You're playing alone. Join a galaxy to invade.");
     setMessage("Your ships set off...");
-    await sync(); // so the galaxy knows what we hold right now
-    const { data } = await post({ action, targetWorldId: target, resource, amount });
+    await sync(); // so the galaxy knows our strength right now
+    const { data } = await post({ action: "invasion", targetWorldId: target });
     setMessage(data.message || data.error || "Galaxy action failed");
     await load(); // picks up the completed action and applies our half of it
   };
@@ -399,7 +415,9 @@ export default function Galaxy({
   // Playing alone: in no galaxy (or, before migration 003, opted out of the shared list). No trading or invading.
   const alone = rooms ? !galaxy : aloneLocal;
   const shown = alone ? [] : planets;
-  if (!open) return null;
+  // Offers sent to us show over the game even while this panel is closed.
+  const incoming = <IncomingOffers sim={sim} offers={offers} />;
+  if (!open) return incoming;
   const members = planets.length + 1;
 
   // The code box, used both to join from alone and to switch to another galaxy.
@@ -444,6 +462,8 @@ export default function Galaxy({
     </form>
   );
   return (
+    <>
+    {incoming}
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
       <div className="glass subtle-scrollbar max-h-[82vh] w-[44rem] overflow-y-auto p-4" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between border-b border-white/10 pb-3">
@@ -514,21 +534,29 @@ export default function Galaxy({
         )}
 
         {enabled && rooms && galaxy && (
-          <div className="mb-4 grid grid-cols-2 gap-2">
+          <div className="mb-4 grid grid-cols-3 gap-2">
             <button
-              onClick={() => setMarketOpen(false)}
-              className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${!marketOpen ? "bg-rose-400/20 text-rose-100 ring-1 ring-rose-300/20" : "bg-white/5 text-white/55 hover:text-white"}`}
+              onClick={() => setTab("invade")}
+              className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${tab === "invade" ? "bg-rose-400/20 text-rose-100 ring-1 ring-rose-300/20" : "bg-white/5 text-white/55 hover:text-white"}`}
             >
               ⚔ Invade
             </button>
             <button
-              onClick={() => setMarketOpen(true)}
+              onClick={() => setTab("market")}
               className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${marketOpen ? "bg-amber-400/20 text-amber-100 ring-1 ring-amber-300/20" : "bg-white/5 text-white/55 hover:text-white"}`}
             >
               ⚖ Market
             </button>
+            <button
+              onClick={() => setTab("offers")}
+              className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${tab === "offers" ? "bg-sky-400/20 text-sky-100 ring-1 ring-sky-300/20" : "bg-white/5 text-white/55 hover:text-white"}`}
+            >
+              🤝 Offers{offers.outgoing.some((o) => o.status === "pending") ? " ·" : ""}
+            </button>
           </div>
         )}
+
+        {enabled && rooms && galaxy && tab === "offers" && <OffersTab planets={shown} sim={sim} spacefaring={spacefaring} offers={offers} />}
 
         {enabled && rooms && galaxy && marketOpen && (
           <div>
@@ -607,29 +635,12 @@ export default function Galaxy({
           </div>
         )}
 
-        {!marketOpen && enabled && !alone && planets.length === 0 && (
+        {tab === "invade" && enabled && !alone && planets.length === 0 && (
           <p className="text-sm text-white/50">You&apos;re the only god here{galaxy ? `. Share the code ${galaxy} so others can join` : ""}.</p>
         )}
-        {!marketOpen && enabled && !spacefaring && shown.length > 0 && <p className="mb-2 text-xs text-white/45">Invading unlocks when your people reach the Space Age.</p>}
-        {!marketOpen && enabled && shown.length > 0 && (
+        {tab === "invade" && enabled && !spacefaring && shown.length > 0 && <p className="mb-2 text-xs text-white/45">Invading unlocks when your people reach the Space Age.</p>}
+        {tab === "invade" && enabled && shown.length > 0 && (
           <>
-            <div className="mb-3 flex gap-2">
-              {/* Buttons, not a native <select>: the HUD re-renders a few times a second as stocks change, which made an open dropdown flicker and close. */}
-              <div className="grid flex-1 grid-cols-3 gap-1">
-                {RESOURCES.map((r) => (
-                  <button
-                    key={r}
-                    type="button"
-                    onClick={() => setResource(r)}
-                    className={`rounded-lg px-2 py-1 text-left text-xs transition ${resource === r ? "bg-sky-400/25 ring-1 ring-sky-300" : "bg-white/5 hover:bg-white/10"}`}
-                  >
-                    <span className="block capitalize">{r}</span>
-                    <span className="block tabular-nums text-white/50">{Math.floor(sim.resources[r])}</span>
-                  </button>
-                ))}
-              </div>
-              <input type="number" min={1} max={10000} value={amount} onChange={(e) => setAmount(Math.max(1, Math.floor(Number(e.target.value)) || 1))} className="w-20 self-start rounded-lg bg-white/10 px-3 py-2 text-sm" />
-            </div>
             <div className="space-y-2">
               {shown.map((p) => (
                 <article key={p.world_id} className="rounded-lg bg-white/5 p-3">
@@ -646,10 +657,7 @@ export default function Galaxy({
                     {p.population} people · {p.output}/yr
                   </p>
                   <div className="mt-2 flex gap-2">
-                    <button disabled={!spacefaring} onClick={() => act("trade", p.world_id)} className="flex-1 rounded bg-emerald-400/15 px-2 py-1.5 text-xs text-emerald-200 hover:bg-emerald-400/25 disabled:opacity-40">
-                      Send {amount} {resource}
-                    </button>
-                    <button disabled={!spacefaring} onClick={() => act("invasion", p.world_id)} className="flex-1 rounded bg-rose-400/15 px-2 py-1.5 text-xs text-rose-200 hover:bg-rose-400/25 disabled:opacity-40">
+                    <button disabled={!spacefaring} onClick={() => invade(p.world_id)} className="flex-1 rounded bg-rose-400/15 px-2 py-1.5 text-xs text-rose-200 hover:bg-rose-400/25 disabled:opacity-40">
                       Invade
                     </button>
                   </div>
@@ -660,5 +668,6 @@ export default function Galaxy({
         )}
       </div>
     </div>
+    </>
   );
 }
