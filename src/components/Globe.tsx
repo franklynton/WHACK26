@@ -442,6 +442,222 @@ function Sun() {
   return <directionalLight ref={ref} intensity={2.3} color="#fff1dc" />;
 }
 
+// ---- Weather and catastrophes: drawn straight from the sim's lists each frame ----
+
+const WX_PUFFS = 9;
+const DROPS = 70;
+const MAX_WX = 8;
+// Fixed puff offsets in a cloud's local frame (x, z across the surface; y up).
+const PUFF_OFFSETS = Array.from({ length: WX_PUFFS }, (_, k) => {
+  const a = (k / WX_PUFFS) * Math.PI * 2 + tileRand(k, 1);
+  const r = k === 0 ? 0 : 0.012 + tileRand(k, 2) * 0.022;
+  return [Math.cos(a) * r, tileRand(k, 3) * 0.006, Math.sin(a) * r, 0.016 + tileRand(k, 4) * 0.012] as const;
+});
+const DROP_OFFSETS = Array.from({ length: DROPS }, (_, k) => {
+  const a = tileRand(k, 5) * Math.PI * 2, r = Math.sqrt(tileRand(k, 6)) * 0.03;
+  return [Math.cos(a) * r, Math.sin(a) * r, tileRand(k, 7)] as const;
+});
+const UP = new THREE.Vector3(0, 1, 0);
+
+// Dark rain clouds and storms, with falling rain and lightning bolts.
+function Weather({ sim }: { sim: PlanetSim }) {
+  const puffs = useRef<THREE.InstancedMesh>(null);
+  const rain = useRef<THREE.LineSegments>(null);
+  const bolt = useRef<THREE.LineSegments>(null);
+  const flash = useRef<THREE.PointLight>(null);
+  const rainGeo = useMemo(() => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(MAX_WX * DROPS * 6), 3));
+    return g;
+  }, []);
+  const boltGeo = useMemo(() => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(MAX_WX * 6 * 6), 3));
+    return g;
+  }, []);
+  const tmp = useMemo(() => ({ m: new THREE.Matrix4(), q: new THREE.Quaternion(), p: new THREE.Vector3(), s: new THREE.Vector3(), c: new THREE.Color(), x: new THREE.Vector3(), z: new THREE.Vector3(), n: new THREE.Vector3(), a: new THREE.Vector3(), b: new THREE.Vector3() }), []);
+  useFrame(({ clock }) => {
+    const mesh = puffs.current, rl = rain.current, bl = bolt.current;
+    if (!mesh || !rl || !bl) return;
+    const { m, q, p, s, c, x, z, n, a, b } = tmp;
+    const rp = rainGeo.getAttribute("position") as THREE.BufferAttribute;
+    const bp = boltGeo.getAttribute("position") as THREE.BufferAttribute;
+    let i = 0, d = 0, k = 0, lit = 0;
+    const t = clock.elapsedTime;
+    for (const w of sim.weather) {
+      n.set(...w.pos);
+      q.setFromUnitVectors(UP, n);
+      x.set(1, 0, 0).applyQuaternion(q);
+      z.set(0, 0, 1).applyQuaternion(q);
+      // Grow in, shrink out.
+      const life = Math.min(1, w.age / 1.5, (w.life - w.age) / 1.5);
+      const flashing = w.flash && sim.year - w.flash.at < 0.25;
+      c.set(w.storm ? (flashing ? "#c9d4ff" : "#3a3f4d") : "#6f7889");
+      for (const [ox, oy, oz, r] of PUFF_OFFSETS) {
+        p.copy(n).multiplyScalar(1.1 + oy).addScaledVector(x, ox * (w.storm ? 1.4 : 1)).addScaledVector(z, oz * (w.storm ? 1.4 : 1));
+        const rr = r * life * (w.storm ? 1.35 : 1);
+        m.compose(p, q, s.set(rr, rr * 0.65, rr));
+        mesh.setMatrixAt(i, m);
+        mesh.setColorAt(i++, c);
+      }
+      // Rain: short streaks falling from the cloud base to the ground, looping.
+      for (const [ox, oz, ph] of DROP_OFFSETS) {
+        const f = (ph + t * (w.storm ? 1.6 : 1.1)) % 1;
+        const h = 1.095 - f * 0.085;
+        a.copy(n).multiplyScalar(h).addScaledVector(x, ox * (w.storm ? 1.4 : 1)).addScaledVector(z, oz * (w.storm ? 1.4 : 1));
+        b.copy(a).addScaledVector(n, -0.012);
+        const o = d * 6;
+        if (life < 0.3) a.copy(b); // no rain while forming
+        rp.array[o] = a.x; rp.array[o + 1] = a.y; rp.array[o + 2] = a.z;
+        rp.array[o + 3] = b.x; rp.array[o + 4] = b.y; rp.array[o + 5] = b.z;
+        d++;
+      }
+      // Lightning: a jagged bolt from the cloud to the strike tile.
+      if (flashing && w.flash) {
+        surface(sim, w.flash.face, b);
+        a.copy(n).multiplyScalar(1.095);
+        let prev = a.clone();
+        for (let j = 1; j <= 6; j++) {
+          const cur = a.clone().lerp(b, j / 6);
+          if (j < 6) cur.addScaledVector(x, (Math.random() - 0.5) * 0.012).addScaledVector(z, (Math.random() - 0.5) * 0.012);
+          const o = k * 6;
+          bp.array[o] = prev.x; bp.array[o + 1] = prev.y; bp.array[o + 2] = prev.z;
+          bp.array[o + 3] = cur.x; bp.array[o + 4] = cur.y; bp.array[o + 5] = cur.z;
+          prev = cur;
+          k++;
+        }
+        if (flash.current && !lit) {
+          flash.current.position.copy(b).multiplyScalar(1.05);
+          lit = 1;
+        }
+      }
+    }
+    mesh.count = i;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    rainGeo.setDrawRange(0, d * 2);
+    rp.needsUpdate = true;
+    boltGeo.setDrawRange(0, k * 2);
+    bp.needsUpdate = true;
+    if (flash.current) flash.current.intensity = lit ? 3 : 0;
+  });
+  return (
+    <>
+      <instancedMesh ref={puffs} args={[undefined, undefined, MAX_WX * WX_PUFFS]} frustumCulled={false}>
+        <icosahedronGeometry args={[1, 1]} />
+        <meshStandardMaterial flatShading transparent opacity={0.92} roughness={1} />
+      </instancedMesh>
+      <lineSegments ref={rain} geometry={rainGeo} frustumCulled={false}>
+        <lineBasicMaterial color="#9cc7ff" transparent opacity={0.55} />
+      </lineSegments>
+      <lineSegments ref={bolt} geometry={boltGeo} frustumCulled={false}>
+        <lineBasicMaterial color="#f4f7ff" />
+      </lineSegments>
+      <pointLight ref={flash} color="#cfd8ff" intensity={0} distance={0.6} />
+    </>
+  );
+}
+
+// Tsunami rings, falling meteors with a fiery trail, and smoke rising from volcanoes.
+const MAX_WAVES = 4, MAX_METEORS = 4, MAX_VOLCANOES = 4, SMOKE = 14;
+function Catastrophes({ sim }: { sim: PlanetSim }) {
+  const waves = useRef<(THREE.Mesh | null)[]>([]);
+  const rocks = useRef<(THREE.Group | null)[]>([]);
+  const smoke = useRef<THREE.InstancedMesh>(null);
+  const glow = useRef<(THREE.PointLight | null)[]>([]);
+  const tmp = useMemo(() => ({ n: new THREE.Vector3(), q: new THREE.Quaternion(), m: new THREE.Matrix4(), p: new THREE.Vector3(), s: new THREE.Vector3(), side: new THREE.Vector3() }), []);
+  useFrame(({ clock }) => {
+    const { n, q, m, p, s, side } = tmp;
+    // Tsunami: a flat ring hugging the sea, whose radius is the wave front.
+    waves.current.forEach((mesh, i) => {
+      const w = sim.waves[i];
+      if (!mesh) return;
+      mesh.visible = !!w;
+      if (!w) return;
+      n.set(...sim.c(w.face));
+      // A ring of angular radius r on a sphere sits at height cos(r) with radius sin(r).
+      const r = Math.max(0.005, w.r);
+      mesh.position.copy(n).multiplyScalar(Math.cos(r) * (SEA + 0.004));
+      mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
+      mesh.scale.setScalar(Math.sin(r) * (SEA + 0.004));
+      (mesh.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 0.9 - (sim.year - w.at) / 5.5);
+    });
+    // Meteors: fall from far out along the tile's normal, slightly slanted.
+    rocks.current.forEach((g, i) => {
+      const mt = sim.meteors[i];
+      if (!g) return;
+      g.visible = !!mt;
+      if (!mt) return;
+      n.set(...sim.c(mt.face));
+      side.set(0, 1, 0).cross(n).normalize();
+      const k = Math.min(1, (sim.year - mt.at) / mt.fall);
+      const h = 1 + 1.6 * (1 - k) * (1 - k);
+      g.position.copy(n).multiplyScalar(h).addScaledVector(side, 0.5 * (1 - k));
+      g.lookAt(0, 0, 0); // the trail (+z behind) points away from the planet
+      const scale = 0.7 + 0.5 * k;
+      g.scale.setScalar(scale);
+    });
+    // Volcano smoke: dark puffs rising and spreading from the crater.
+    const sm = smoke.current;
+    if (sm) {
+      let i = 0;
+      const t = clock.elapsedTime;
+      sim.volcanoes.slice(0, MAX_VOLCANOES).forEach((v, vi) => {
+        surface(sim, v.face, p);
+        n.copy(p).normalize();
+        q.setFromUnitVectors(UP, n);
+        side.set(1, 0, 0).applyQuaternion(q);
+        const fade = Math.min(1, (v.life - (sim.year - v.at)) / 3);
+        for (let j = 0; j < SMOKE; j++) {
+          const f = (j / SMOKE + t * 0.25) % 1;
+          const r = (0.008 + f * 0.022) * fade;
+          const pos = p.clone().addScaledVector(n, 0.01 + f * 0.12).addScaledVector(side, f * 0.03 * Math.sin(j * 2.3));
+          m.compose(pos, q, s.set(r, r, r));
+          sm.setMatrixAt(i++, m);
+        }
+        const l = glow.current[vi];
+        if (l) {
+          l.position.copy(p).multiplyScalar(1.02);
+          l.intensity = (1.2 + Math.sin(t * 9) * 0.4) * fade;
+        }
+      });
+      for (let vi = sim.volcanoes.length; vi < MAX_VOLCANOES; vi++) if (glow.current[vi]) glow.current[vi]!.intensity = 0;
+      sm.count = i;
+      sm.instanceMatrix.needsUpdate = true;
+    }
+  });
+  return (
+    <>
+      {Array.from({ length: MAX_WAVES }, (_, i) => (
+        <mesh key={`w${i}`} ref={(el) => { waves.current[i] = el; }} visible={false}>
+          <ringGeometry args={[0.93, 1, 96]} />
+          <meshBasicMaterial color="#d8f6ff" transparent opacity={0.9} side={THREE.DoubleSide} depthWrite={false} />
+        </mesh>
+      ))}
+      {Array.from({ length: MAX_METEORS }, (_, i) => (
+        <group key={`m${i}`} ref={(el) => { rocks.current[i] = el; }} visible={false}>
+          <mesh>
+            <icosahedronGeometry args={[0.025, 0]} />
+            <meshStandardMaterial color="#5a4632" emissive="#ff7a1a" emissiveIntensity={1.4} flatShading />
+          </mesh>
+          {/* Fiery trail behind the rock (away from the planet). */}
+          <mesh position={[0, 0, -0.09]} rotation={[-Math.PI / 2, 0, 0]}>
+            <coneGeometry args={[0.022, 0.18, 10, 1, true]} />
+            <meshBasicMaterial color="#ffb347" transparent opacity={0.75} depthWrite={false} side={THREE.DoubleSide} />
+          </mesh>
+        </group>
+      ))}
+      <instancedMesh ref={smoke} args={[undefined, undefined, MAX_VOLCANOES * SMOKE]} frustumCulled={false}>
+        <icosahedronGeometry args={[1, 1]} />
+        <meshStandardMaterial color="#3b3533" flatShading transparent opacity={0.85} roughness={1} />
+      </instancedMesh>
+      {Array.from({ length: MAX_VOLCANOES }, (_, i) => (
+        <pointLight key={`g${i}`} ref={(el) => { glow.current[i] = el; }} color="#ff5a1a" intensity={0} distance={0.25} />
+      ))}
+    </>
+  );
+}
+
 // Runs the simulation in step with rendering, at `speed` years per second.
 function Clock({ sim, speed }: { sim: PlanetSim; speed: number }) {
   useFrame((_, dt) => {
@@ -467,6 +683,8 @@ export default function Globe({ sim, tool, speed, onPaint, onHover, focus }: { s
       <Trees sim={sim} />
       <Ocean />
       <Clouds />
+      <Weather sim={sim} />
+      <Catastrophes sim={sim} />
       <Atmosphere />
       <OrbitControls
         enablePan={false}

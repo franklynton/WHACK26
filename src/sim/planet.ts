@@ -66,6 +66,28 @@ export interface Nation {
   alive: boolean;
 }
 
+// A drifting rain cloud or storm. `pos` is a unit vector; `face` is the tile underneath.
+export type Weather = {
+  id: number; face: number; pos: [number, number, number]; axis: [number, number, number]; storm: boolean;
+  speed: number; age: number; life: number; rainTimer: number; nextStrike: number; flash: { face: number; at: number } | null;
+};
+const MAX_WEATHER = 8;
+const cap = (t: string) => t[0].toUpperCase() + t.slice(1);
+const FATE_TITLES: Record<GodPower, string> = {
+  spawn: "Strangers", raise: "The earth rises", lower: "The sea rises", forest: "A new forest", rain: "Rain", drought: "Drought",
+  miracle: "A miracle", peace: "Calm", discord: "Unrest", fire: "Wildfire", meteor: "Meteor",
+};
+const FATE_ICONS: Record<GodPower, string> = {
+  spawn: "🧍", raise: "⛰️", lower: "🌊", forest: "🌲", rain: "🌧️", drought: "☀️",
+  miracle: "✨", peace: "🕊️", discord: "😈", fire: "🔥", meteor: "☄️",
+};
+// A tsunami ring spreading from `face`; a meteor falling towards `face`; an erupting volcano at `face`.
+export type Wave = { id: number; face: number; at: number; r: number };
+export type Meteor = { id: number; face: number; at: number; radius: number; fall: number; natural: boolean };
+export type Volcano = { id: number; face: number; at: number; life: number; nextBurst: number };
+// The latest thing that happened, for the HUD's pop-up.
+export type Alert = { icon: string; title: string; text: string; at: number; face: number };
+
 export const NATION_COLORS = ["#ff2bd6", "#00f0ff", "#a24dff", "#ff1f4b", "#3d5aff"]; // neon, so borders pop against the terrain
 const NATION_HUES = ["Rose", "Azure", "Violet", "Crimson", "Cobalt"]; // placeholder names until each mind names itself
 
@@ -485,6 +507,8 @@ export class PlanetSim {
     this.stepVillages(dt);
     this.stepNations(dt);
     this.stepNeeds(dt);
+    this.stepWeather(dt);
+    this.stepCatastrophes(dt);
     this.maybeDisaster(dt);
     this.maybeFate(dt);
     this.checkMilestones();
@@ -899,7 +923,8 @@ export class PlanetSim {
     const target = Math.random() < 0.8 ? this.people[Math.floor(Math.random() * this.people.length)].face : Math.floor(Math.random() * this.n);
     const radius = 0.05 + Math.random() * 0.08;
     const strokes = power === "meteor" || power === "spawn" ? 1 : power === "fire" ? 2 : 6; // a brush power is painted several times
-    for (let i = 0; i < strokes; i++) this.apply(power, target, radius);
+    if (power === "meteor") this.startMeteor(target, radius, false); // falls for a few years before it strikes
+    else for (let i = 0; i < strokes; i++) this.apply(power, target, radius);
     const nation = this.owner[target] >= 0 ? this.owner[target] : this.nearestNation(target);
     const where = this.nationName(nation);
     const words: Record<GodPower, string> = {
@@ -908,33 +933,245 @@ export class PlanetSim {
       spawn: `Strangers appear from nowhere near ${where}.`, raise: `The land heaves up near ${where}.`, lower: `The sea swallows land near ${where}.`,
       fire: `Fire breaks out near ${where}.`, meteor: `A meteor falls near ${where}.`,
     };
+    if (power === "rain") this.addWeather(target, false); // a visible rain cloud over the spot
     this.fate = { power, text: words[power], at: this.year };
-    if (power !== "meteor") this.events.push({ kind: power, detail: `${words[power]} The people believe their god did it.`, nation });
+    if (power !== "meteor") this.announce(FATE_ICONS[power], FATE_TITLES[power], words[power], target);
+    this.events.push({ kind: power, detail: `${words[power]} The people believe their god did it.`, nation });
   }
 
-  private nextDisaster = 40 + Math.random() * 40; // years until the next one
+  // ---- Catastrophes: tsunamis, meteors and volcanoes play out over a few years ----
+
+  waves: Wave[] = [];
+  meteors: Meteor[] = [];
+  volcanoes: Volcano[] = [];
+  alert: Alert | null = null;
+
+  private announce(icon: string, title: string, text: string, face: number) {
+    this.alert = { icon, title, text, at: this.year, face };
+  }
+
+  private where(face: number) {
+    return this.nationName(this.owner[face] >= 0 ? this.owner[face] : this.nearestNation(face));
+  }
+
+  // Find open sea a little way off a coast near `face`, for a tsunami to start from.
+  private seaNear(face: number) {
+    let best = -1, bd = -2;
+    for (const [f] of this.tilesNear(face, 0.25)) if (this.terrain[f] === T.Deep || this.terrain[f] === T.Shallow) {
+      const d = this.dot(face, f) - Math.abs(this.angle(face, f) - 0.12) * 4; // prefer ~0.12 rad offshore
+      if (d > bd) [best, bd] = [f, d];
+    }
+    return best;
+  }
+
+  startTsunami(face: number) {
+    const sea = this.seaNear(face);
+    if (sea < 0) return false;
+    this.waves.push({ id: this.nextId++, face: sea, at: this.year, r: 0 });
+    this.announce("🌊", "Tsunami!", `A great wave rises from the sea and races towards ${this.where(face)}.`, sea);
+    return true;
+  }
+
+  startMeteor(face: number, radius: number, natural: boolean) {
+    this.meteors.push({ id: this.nextId++, face, at: this.year, radius, fall: 2.5, natural });
+    this.announce("☄️", "Meteor incoming!", `A burning star is falling towards ${this.where(face)}.`, face);
+  }
+
+  startVolcano(face: number) {
+    // Erupt from the highest ground nearby.
+    let top = face;
+    for (const [f] of this.tilesNear(face, 0.12)) if (this.elevation[f] > this.elevation[top]) top = f;
+    for (const [f, w] of this.tilesNear(top, 0.07)) {
+      this.elevation[f] = Math.min(1, this.elevation[f] + 0.35 * w * w + 0.05);
+      this.forest[f] = 0;
+      this.classify(f);
+    }
+    this.volcanoes.push({ id: this.nextId++, face: top, at: this.year, life: 14 + Math.random() * 8, nextBurst: 0 });
+    this.version++;
+    this.announce("🌋", "Volcano!", `The ground splits open and a volcano erupts near ${this.where(top)}.`, top);
+    this.events.push({ kind: "disaster", detail: `A volcano erupted near ${this.where(top)}.`, nation: this.owner[top] >= 0 ? this.owner[top] : undefined });
+  }
+
+  private stepCatastrophes(dt: number) {
+    // Tsunami: the ring grows, and low land it passes over is swept clean.
+    for (const w of this.waves) {
+      const r0 = w.r;
+      w.r = Math.min(0.32, w.r + dt * 0.09);
+      if (w.r === r0) continue;
+      const cosIn = Math.cos(r0), cosOut = Math.cos(w.r);
+      const hit = new Set<number>();
+      for (let f = 0; f < this.n; f++) {
+        const d = this.dot(w.face, f);
+        if (d > cosIn || d < cosOut || isWater(this.terrain[f] as T)) continue;
+        // The wave weakens as it spreads, so only ever-lower ground floods far out.
+        if (this.elevation[f] > 0.22 - w.r * 0.4) continue;
+        this.forest[f] = 0;
+        this.food[f] = 0;
+        this.farm[f] = 0;
+        this.scorch[f] = Math.max(this.scorch[f], 6);
+        hit.add(f);
+        this.classify(f);
+      }
+      if (hit.size) {
+        const killed = this.killWhere((p) => hit.has(p.face));
+        const lost = this.villages.filter((v) => hit.has(v.face));
+        this.villages = this.villages.filter((v) => !hit.has(v.face));
+        this.version++;
+        if (killed || lost.length) {
+          const n = this.owner[[...hit][0]];
+          this.events.push({ kind: "disaster", detail: `A tsunami swept the coast${lost.length ? `, destroying ${lost.map((v) => v.name).join(", ")}` : ""}${killed ? ` and drowning ${killed} people` : ""}.`, nation: n >= 0 ? n : undefined });
+          if (n >= 0) this.nations[n].stability -= 6;
+        }
+      }
+    }
+    this.waves = this.waves.filter((w) => this.year - w.at < 5);
+
+    // Meteors: fall for a few years, then strike.
+    for (const m of this.meteors) if (this.year - m.at >= m.fall) {
+      this.apply("meteor", m.face, m.radius);
+      this.announce("💥", "Impact!", `The meteor struck near ${this.where(m.face)}.`, m.face);
+    }
+    this.meteors = this.meteors.filter((m) => this.year - m.at < m.fall);
+
+    // Volcanoes: bursts of lava set the slopes alight and bury the land in ash.
+    for (const v of this.volcanoes) {
+      v.nextBurst -= dt;
+      if (v.nextBurst > 0) continue;
+      v.nextBurst = 1 + Math.random() * 1.5;
+      for (const [f, w] of this.tilesNear(v.face, 0.09)) {
+        if (Math.random() < 0.35 * w + 0.05) this.ignite(f);
+        this.scorch[f] = Math.max(this.scorch[f], 20 * w);
+        this.food[f] *= 0.5;
+      }
+      const killed = this.killWhere((p) => this.angle(p.face, v.face) < 0.05 && Math.random() < 0.6);
+      const before = this.villages.length;
+      this.villages = this.villages.filter((x) => this.angle(x.face, v.face) > 0.04);
+      if (killed || this.villages.length < before) this.events.push({ kind: "disaster", detail: `Lava from the volcano killed ${killed} people${this.villages.length < before ? " and buried a village" : ""}.`, nation: this.owner[v.face] >= 0 ? this.owner[v.face] : undefined });
+      this.version++;
+    }
+    this.volcanoes = this.volcanoes.filter((v) => this.year - v.at < v.life);
+  }
+
+  // ---- Weather: rain clouds and storms that drift around the planet ----
+
+  weather: Weather[] = [];
+  private nextWeather = 2 + Math.random() * 4;
+
+  // Start a rain cloud (or a storm) over `face`, drifting along a random great circle.
+  addWeather(face: number, storm: boolean) {
+    if (this.weather.length >= MAX_WEATHER) this.weather.shift();
+    const pos = this.c(face);
+    const axis = new THREE.Vector3().randomDirection().cross(new THREE.Vector3(...pos)).normalize();
+    this.weather.push({
+      id: this.nextId++, face, pos, axis: [axis.x, axis.y, axis.z], storm,
+      speed: 0.04 + Math.random() * 0.05, age: 0, life: storm ? 10 + Math.random() * 8 : 14 + Math.random() * 14,
+      rainTimer: 0, nextStrike: 1 + Math.random() * 2, flash: null,
+    });
+    const nation = this.owner[face];
+    if (storm) this.announce("⛈️", "Storm!", `A thunderstorm is building over ${this.where(face)}.`, face);
+    if (storm && nation >= 0) this.events.push({ kind: "disaster", detail: `A great storm rolls over ${this.nationName(nation)}.`, nation });
+  }
+
+  private stepWeather(dt: number) {
+    this.nextWeather -= dt;
+    if (this.nextWeather <= 0) {
+      this.nextWeather = 3 + Math.random() * 6;
+      const nearPeople = this.people.length && Math.random() < 0.6;
+      const face = nearPeople ? this.people[Math.floor(Math.random() * this.people.length)].face : Math.floor(Math.random() * this.n);
+      this.addWeather(face, Math.random() < 0.3);
+    }
+    const v = new THREE.Vector3(), ax = new THREE.Vector3();
+    for (const w of this.weather) {
+      w.age += dt;
+      // Drift: rotate the position about the cloud's own axis, then follow it across tiles.
+      v.set(...w.pos).applyAxisAngle(ax.set(...w.axis), w.speed * dt);
+      w.pos = [v.x, v.y, v.z];
+      w.face = this.walkTo(w.face, v);
+      w.rainTimer -= dt;
+      if (w.rainTimer <= 0) {
+        w.rainTimer = 0.5;
+        this.rainOn(w.face, w.storm ? 0.11 : 0.08, w.storm ? 2 : 1);
+      }
+      if (w.storm) {
+        w.nextStrike -= dt;
+        if (w.nextStrike <= 0) {
+          w.nextStrike = 1.5 + Math.random() * 2.5;
+          // Lightning lands somewhere under the storm; on dry land it can start a fire.
+          let f = w.face;
+          for (let i = 0; i < 6; i++) f = this.neighbours[f * 3 + Math.floor(Math.random() * 3)];
+          w.flash = { face: f, at: this.year };
+          if (Math.random() < 0.35) this.ignite(f);
+          const killed = this.killWhere((p) => p.face === f && Math.random() < 0.5);
+          const o = this.owner[f];
+          if (o >= 0) this.nations[o].stability -= 1;
+          if (killed && o >= 0) this.events.push({ kind: "disaster", detail: `Lightning struck in ${this.nationName(o)}, killing ${killed}.`, nation: o });
+        }
+      }
+    }
+    this.weather = this.weather.filter((w) => w.age < w.life);
+  }
+
+  // Greedy walk across neighbouring tiles towards direction `v` (clouds move a little each frame).
+  private walkTo(f: number, v: THREE.Vector3) {
+    for (let i = 0; i < 40; i++) {
+      let best = f, bd = this.centroids[f * 3] * v.x + this.centroids[f * 3 + 1] * v.y + this.centroids[f * 3 + 2] * v.z;
+      for (let k = 0; k < 3; k++) {
+        const nb = this.neighbours[f * 3 + k];
+        const d = this.centroids[nb * 3] * v.x + this.centroids[nb * 3 + 1] * v.y + this.centroids[nb * 3 + 2] * v.z;
+        if (d > bd) [best, bd] = [nb, d];
+      }
+      if (best === f) return f;
+      f = best;
+    }
+    return f;
+  }
+
+  // Rain waters the land, grows food and puts out fires within a few tiles of `centre`.
+  private rainOn(centre: number, radius: number, strength: number) {
+    let changed = false;
+    for (const [f, w] of this.tilesNear(centre, radius)) {
+      this.moisture[f] = Math.min(1, this.moisture[f] + 0.015 * strength * w);
+      this.food[f] = Math.min(1, this.food[f] + 0.04 * strength * w);
+      if (this.fire[f] > 0) {
+        this.fire[f] = 0;
+        this.burning.delete(f);
+        changed = true;
+      }
+      const before = this.terrain[f];
+      this.classify(f);
+      if (this.terrain[f] !== before) changed = true;
+    }
+    if (changed) this.version++;
+  }
+
+  private nextDisaster = 15 + Math.random() * 15; // years until the next one
 
   private maybeDisaster(dt: number) {
     this.nextDisaster -= dt;
     if (this.nextDisaster > 0 || this.people.length < 20) return;
-    this.nextDisaster = 35 + Math.random() * 55;
+    this.nextDisaster = 20 + Math.random() * 25;
     // Usually aim near people, so the disaster matters.
     const target = this.people.length && Math.random() < 0.75 ? this.people[Math.floor(Math.random() * this.people.length)].face : Math.floor(Math.random() * this.n);
     const roll = Math.random();
+    // The big three play out over several years and announce themselves.
+    if (roll < 0.12) return void (this.startTsunami(target) || this.startVolcano(target));
+    if (roll < 0.22) return this.startMeteor(target, 0.06 + Math.random() * 0.04, true);
+    if (roll < 0.32) return this.startVolcano(target);
     const before = this.people.length;
     let kind: string;
-    if (roll < 0.35) {
-      kind = "lightning";
+    if (roll < 0.5) {
+      kind = "lightning storm";
+      this.addWeather(target, true);
       this.ignite(target);
       for (let k = 0; k < 3; k++) this.ignite(this.neighbours[target * 3 + k]);
-    } else if (roll < 0.6) {
+    } else if (roll < 0.66) {
       kind = "drought";
       for (const [f] of this.tilesNear(target, 0.2)) {
         this.moisture[f] = Math.max(0, this.moisture[f] - 0.15);
         this.food[f] *= 0.4;
         this.classify(f);
       }
-    } else if (roll < 0.8) {
+    } else if (roll < 0.82) {
       kind = "earthquake";
       for (const [f, w] of this.tilesNear(target, 0.12)) {
         this.elevation[f] = Math.max(-1, Math.min(1, this.elevation[f] + (Math.random() - 0.5) * 0.25 * w));
@@ -942,7 +1179,7 @@ export class PlanetSim {
       }
       this.villages = this.villages.filter((v) => this.angle(v.face, target) > 0.05 || Math.random() < 0.5 + 0.15 * this.levels.stone);
       this.killWhere((p) => isWater(this.terrain[p.face] as T));
-    } else if (roll < 0.92) {
+    } else if (roll < 0.93) {
       kind = "flood";
       for (const [f, w] of this.tilesNear(target, 0.1)) {
         if (this.elevation[f] < 0.12) this.elevation[f] -= 0.1 * w;
@@ -961,6 +1198,8 @@ export class PlanetSim {
     for (const id of hit) this.nations[id].stability -= 8;
     this.version++;
     this.events.push({ kind: "disaster", detail: `A natural ${kind} struck${dead ? `, killing ${dead} people` : ""}. The god did not cause it.`, nation: [...hit][0] });
+    const icons: Record<string, string> = { "lightning storm": "⛈️", drought: "☀️", earthquake: "🫨", flood: "🌊", plague: "☠️" };
+    this.announce(icons[kind] ?? "⚠️", cap(kind) + "!", `A ${kind} strikes ${this.where(target)}${dead ? `, killing ${dead} people` : ""}.`, target);
   }
 
   private nationFood(id: number) {

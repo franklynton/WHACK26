@@ -78,3 +78,14 @@ body {
     background-position: 1100px 0;
   }
 }
+
+/* Disaster/weather pop-up: drops in from the top. */
+@keyframes alert-pop {
+  0% { opacity: 0; transform: translateY(-14px) scale(0.96); }
+  100% { opacity: 1; transform: none; }
+}
+.alert-pop {
+  animation: alert-pop 0.35s ease-out;
+  border-color: rgba(255, 190, 120, 0.45);
+  box-shadow: 0 0 30px rgba(255, 140, 60, 0.18);
+}
