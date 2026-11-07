@@ -160,7 +160,9 @@ export default function Game({
   const [hud, setHud] = useState<Hud>(() => readHud(sim));
   const [miracle, setMiracle] = useState<MiracleId | null>(null); // picked from the bar; click the land to cast
   const [seenOutcome, setSeenOutcome] = useState(false);
-  const [galaxy, setGalaxy] = useState<"market" | "invade" | "join" | null>(null);
+  const [galaxy, setGalaxy] = useState<"market" | "invade" | "join" | null>(
+    null,
+  );
   const [upgradesOpen, setUpgradesOpen] = useState(false);
   const resourcesPanelRef = useRef<HTMLDivElement>(null);
   const upgradesMenuRef = useRef<HTMLDivElement>(null);
@@ -645,15 +647,28 @@ export default function Game({
           <p className="truncate text-2xl font-semibold" title={planetName}>
             {planetName}
           </p>
-          <p className="text-xs text-white/55">
-            {sim.type.name} world · prone to {sim.type.hazard}s
-          </p>
-          <p
-            className="text-[11px] text-white/40"
-            title="Between planets: armies from this kind of world beat yours"
-          >
-            Weak to {sim.type.weakTo} ({sim.type.weakWhy})
-          </p>
+          <div className="mt-2 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-sky-200/90">
+                {sim.type.name} world
+              </span>
+              <span className="text-[10px] uppercase tracking-wider text-amber-200/60">
+                {sim.type.hazard} risk
+              </span>
+            </div>
+            <p className="mt-1 text-[11px] leading-snug text-white/55">
+              {sim.type.blurb}
+            </p>
+            <p
+              className="mt-1.5 border-t border-white/10 pt-1.5 text-[11px] leading-snug text-white/45"
+              title="Between planets: armies from this kind of world beat yours"
+            >
+              <span className="font-semibold text-white/60">
+                Weak to {sim.type.weakTo}.
+              </span>{" "}
+              {sim.type.weakWhy}
+            </p>
+          </div>
           <div className="my-2 flex gap-2">
             <div
               className="flex-1 rounded-lg bg-sky-400/15 px-2.5 py-1.5"
@@ -688,7 +703,6 @@ export default function Game({
             </p>
           </div>
           <Goal hud={hud} />
-          <p className="text-xs text-white/45">{sim.type.blurb}</p>
           <p className="text-sm text-white/60">
             {stats.population.toLocaleString()} people · {stats.villages}{" "}
             {stats.villages === 1 ? "village" : "villages"}
@@ -1091,42 +1105,44 @@ export default function Game({
           <NeedBars needs={me.needs} crisis={me.crisis} love={me.love} />
           {civ ? (
             <>
-              <p>
-                <span className="label">Focus</span>{" "}
+              <div className="hud-meta-row">
+                <span className="hud-meta-label">Crisis</span>
                 <span
-                  className={
-                    me.policy === "rebel"
-                      ? "font-semibold text-rose-300"
-                      : "font-semibold"
-                  }
+                  className={`hud-meta-value ${me.crisis ? "!text-rose-300" : "text-white/45"}`}
+                >
+                  {me.crisis ? cap(me.crisis) : "None"}
+                </span>
+              </div>
+              <div className="hud-meta-row">
+                <span className="hud-meta-label">Focus</span>
+                <span
+                  className={`hud-meta-value ${me.policy === "rebel" ? "text-rose-300" : ""}`}
                 >
                   {POLICY_LABEL[me.policy]}
                 </span>
                 {reasons[sel] && (
-                  <span className="block text-xs text-white/50">
-                    {reasons[sel]}
-                  </span>
+                  <span className="hud-meta-note">{reasons[sel]}</span>
                 )}
-              </p>
-              <p>
-                <span className="label">Faith</span> {civ.religion.name}
-              </p>
-              <p className="text-white/70">
-                They call you <b>{civ.religion.godName}</b>.{" "}
-                {civ.religion.belief}
-              </p>
-              <p>
-                <span className="label">They feel</span>{" "}
-                <span
-                  className={
-                    civ.attitude === "hostile" || civ.attitude === "resentful"
-                      ? "text-rose-300"
-                      : ""
-                  }
-                >
-                  {civ.attitude}
+              </div>
+              <div className="hud-meta-row">
+                <span className="hud-meta-label">Faith</span>
+                <span className="hud-meta-value">{civ.religion.name}</span>
+              </div>
+              <div className="hud-meta-row">
+                <span className="hud-meta-label">Their belief</span>
+                <span className="hud-meta-note text-white/70">
+                  They call you <b>{civ.religion.godName}</b>.{" "}
+                  {civ.religion.belief}
                 </span>
-              </p>
+              </div>
+              <div className="hud-meta-row">
+                <span className="hud-meta-label">Attitude</span>
+                <span
+                  className={`hud-meta-value ${civ.attitude === "hostile" || civ.attitude === "resentful" ? "text-rose-300" : ""}`}
+                >
+                  {cap(civ.attitude)}
+                </span>
+              </div>
             </>
           ) : (
             <p className="text-white/50">
@@ -1143,19 +1159,33 @@ export default function Game({
               disabled={!link.galaxy || !hud.god.spacefaring}
               onClick={() => setGalaxy("invade")}
               className="group rounded-lg border border-rose-300/15 bg-rose-400/10 px-3 py-3 text-left transition hover:border-rose-300/30 hover:bg-rose-400/20 disabled:cursor-not-allowed disabled:border-white/5 disabled:bg-white/[0.03] disabled:text-white/30"
-              title={!link.galaxy ? "Join a galaxy to invade" : !hud.god.spacefaring ? "Reach the Space Age to invade" : "Choose a planet to invade"}
+              title={
+                !link.galaxy
+                  ? "Join a galaxy to invade"
+                  : !hud.god.spacefaring
+                    ? "Reach the Space Age to invade"
+                    : "Choose a planet to invade"
+              }
             >
               <span className="block text-lg">⚔️</span>
               <span className="mt-1 block text-sm font-semibold">Invade</span>
               <span className="block text-[10px] text-current opacity-60">
-                {!link.galaxy ? "Join a galaxy first" : !hud.god.spacefaring ? "Space Age required" : "Launch an attack"}
+                {!link.galaxy
+                  ? "Join a galaxy first"
+                  : !hud.god.spacefaring
+                    ? "Space Age required"
+                    : "Launch an attack"}
               </span>
             </button>
             <button
               disabled={!link.galaxy}
               onClick={() => setGalaxy("market")}
               className="group rounded-lg border border-amber-300/15 bg-amber-400/10 px-3 py-3 text-left transition hover:border-amber-300/30 hover:bg-amber-400/20 disabled:cursor-not-allowed disabled:border-white/5 disabled:bg-white/[0.03] disabled:text-white/30"
-              title={!link.galaxy ? "Join a galaxy to use the market" : "Open the galaxy market"}
+              title={
+                !link.galaxy
+                  ? "Join a galaxy to use the market"
+                  : "Open the galaxy market"
+              }
             >
               <span className="block text-lg">⚖️</span>
               <span className="mt-1 block text-sm font-semibold">Market</span>
@@ -1172,31 +1202,44 @@ export default function Game({
                 : "bg-indigo-400/30 text-white hover:bg-indigo-400/40"
             }`}
           >
-            {link.galaxy ? `Galaxy ${link.galaxy} · Manage` : "🌌 Join a galaxy"}
+            {link.galaxy
+              ? `Galaxy ${link.galaxy} · Manage`
+              : "🌌 Join a galaxy"}
           </button>
         </div>
 
-        <p className="label mb-2">
-          Chronicle{" "}
+        <div className="mb-2 flex items-center justify-between">
+          <p className="label">Chronicle</p>
           {busy === "narrating" && (
-            <span className="animate-pulse">· writing…</span>
+            <span className="text-[10px] uppercase tracking-wider text-amber-200/60 animate-pulse">
+              Writing…
+            </span>
           )}
-        </p>
-        <ol className="subtle-scrollbar flex-1 space-y-3 overflow-y-auto text-sm">
+        </div>
+        <ol className="subtle-scrollbar flex-1 space-y-2 overflow-y-auto pr-1">
           {[...chronicle].reverse().map((c, i) => (
-            <li key={chronicle.length - i}>
-              {c.nation != null && (
-                <span
-                  className="mr-1.5 inline-block h-2 w-2 rounded-full"
-                  style={{ background: sim.nations[c.nation].color }}
-                />
-              )}
-              <span className="text-white/40">
-                Year {Math.floor(c.year)} ·{" "}
-              </span>
-              {c.text}
+            <li key={chronicle.length - i} className="chronicle-entry">
+              <div className="chronicle-year">
+                <span>Year</span>
+                <strong>{Math.floor(c.year)}</strong>
+              </div>
+              <div className="min-w-0 flex-1 text-[13px] leading-snug text-white/75">
+                {c.nation != null && (
+                  <span
+                    className="mr-1.5 inline-block h-2 w-2 align-middle rounded-full"
+                    style={{ background: sim.nations[c.nation].color }}
+                    title={sim.nations[c.nation].name}
+                  />
+                )}
+                {c.text}
+              </div>
             </li>
           ))}
+          {!chronicle.length && (
+            <li className="py-3 text-xs text-white/40">
+              The story of this world will appear here.
+            </li>
+          )}
         </ol>
       </aside>
       {hud.god.outcome && !seenOutcome && (
@@ -1542,14 +1585,16 @@ function NeedBars({
     ...(love != null ? [["Love for you", love] as [string, number]] : []),
   ];
   return (
-    <div className="space-y-1.5">
+    <div className="mt-1 mb-4 space-y-2.5 border-t border-white/10 pt-2">
       {bars.map(([name, v]) => (
         <div key={name}>
-          <div className="flex justify-between text-xs text-white/70">
-            <span>{name}</span>
-            <span className="tabular-nums">{Math.round(v)}</span>
+          <div className="mb-1 flex items-baseline justify-between">
+            <span className="hud-meta-label text-white/65">{name}</span>
+            <span className="text-[11px] font-semibold tabular-nums text-white/65">
+              {Math.round(v)}
+            </span>
           </div>
-          <div className="h-1.5 rounded-full bg-white/10">
+          <div className="h-1 rounded-full bg-white/10">
             <div
               className={`h-full rounded-full transition-all ${v < 25 ? "bg-rose-400" : "bg-sky-300"}`}
               style={{ width: `${Math.max(0, Math.min(100, v))}%` }}
@@ -1557,11 +1602,6 @@ function NeedBars({
           </div>
         </div>
       ))}
-      {crisis && (
-        <p className="text-sm font-semibold uppercase tracking-wide text-rose-300">
-          {crisis}
-        </p>
-      )}
     </div>
   );
 }

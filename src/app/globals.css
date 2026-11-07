@@ -40,6 +40,56 @@ body {
   letter-spacing: 0.08em;
   color: rgba(255, 255, 255, 0.45);
 }
+.hud-meta-row {
+  display: grid;
+  grid-template-columns: 5.2rem minmax(0, 1fr);
+  gap: 0.35rem;
+  align-items: baseline;
+}
+.hud-meta-label {
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.hud-meta-value {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.hud-meta-note {
+  grid-column: 2;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
+.chronicle-entry {
+  display: flex;
+  gap: 0.65rem;
+  align-items: flex-start;
+  padding: 0.55rem 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 0.65rem;
+  background: rgba(255, 255, 255, 0.025);
+}
+.chronicle-year {
+  display: flex;
+  min-width: 2.8rem;
+  flex-direction: column;
+  padding-top: 0.05rem;
+  color: rgba(255, 255, 255, 0.38);
+  font-size: 0.58rem;
+  line-height: 1.1;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.chronicle-year strong {
+  margin-top: 0.2rem;
+  color: rgba(186, 230, 253, 0.8);
+  font-size: 0.78rem;
+  letter-spacing: 0;
+}
 .tool {
   display: flex;
   flex-direction: column;

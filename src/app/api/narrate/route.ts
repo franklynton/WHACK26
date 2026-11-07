@@ -1,7 +1,14 @@
 import { NextResponse } from "next/server";
 import type { ChronicleEntry, ChronicleKind, Civ, World } from "@/types/world";
 import { askJson } from "@/lib/openrouter";
-import { fallbackCiv, fallbackReaction, genesisPrompt, isGenesis, isReaction, reactPrompt } from "@/lib/narrator";
+import {
+  fallbackCiv,
+  fallbackReaction,
+  genesisPrompt,
+  isGenesis,
+  isReaction,
+  reactPrompt,
+} from "@/lib/narrator";
 import { allowAi, visitorId } from "@/lib/rateLimit";
 
 interface Body {
@@ -20,16 +27,26 @@ export async function POST(req: Request) {
     const g = ai ? await askJson(p.system, p.user, isGenesis, 700) : null;
     const base = fallbackCiv(world.nation?.id);
     const civ: Civ = g ? { ...base, ...g.civ, attitude: "worship" } : base;
-    const entry: ChronicleEntry = { year: world.year, kind: "genesis", text: g?.text ?? `${civ.demonym[0].toUpperCase()}${civ.demonym.slice(1)} light their first fires and name their world ${civ.name}.` };
+    const entry: ChronicleEntry = {
+      year: world.year,
+      kind: "genesis",
+      text:
+        g?.text ??
+        `${civ.demonym[0].toUpperCase()}${civ.demonym.slice(1)} light their first fires and name their world ${civ.name}.`,
+    };
     return NextResponse.json({ civ, entry });
   }
 
   const p = reactPrompt(world, kind, detail);
-  const r = (ai ? await askJson(p.system, p.user, isReaction, 400) : null) ?? fallbackReaction(world, kind);
+  const r =
+    (ai ? await askJson(p.system, p.user, isReaction, 400) : null) ??
+    fallbackReaction(world, kind);
   const civ: Civ = {
     ...world.civ,
     attitude: r.attitude,
-    myths: r.newMyth ? [...world.civ.myths, r.newMyth].slice(-8) : world.civ.myths,
+    myths: r.newMyth
+      ? [...world.civ.myths, r.newMyth].slice(-8)
+      : world.civ.myths,
     laws: r.newLaw ? [...world.civ.laws, r.newLaw].slice(-8) : world.civ.laws,
   };
   const entry: ChronicleEntry = { year: world.year, kind, text: r.text };
