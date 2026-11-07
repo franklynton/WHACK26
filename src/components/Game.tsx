@@ -10,14 +10,13 @@ import LeaderDialog from "./LeaderDialog";
 import Portrait, { type Mood } from "./Portrait";
 import { ERAS, RACE, type RaceId } from "@/sim/races";
 import { UPGRADES, type UpgradeId } from "@/sim/upgrades";
-import { PLANET_TYPES, PlanetSim, type SimEvent } from "@/sim/planet";
+import { PLANET_TYPES, PlanetSim, SECONDS_PER_YEAR, type SimEvent } from "@/sim/planet";
 import { fallbackCiv, fallbackLeader, fallbackReaction, fallbackThought, type LeaderReply } from "@/lib/narrator";
 import type { ChronicleEntry, ChronicleKind, Civ, Crisis, LeaderMessage, MindMessage, NationInfo, Needs, PlanetStats, Policy, Relation, World } from "@/types/world";
 
 const SPEEDS = [
   { label: "⏸", speed: 0 },
   { label: "1×", speed: 1 },
-  { label: "3×", speed: 3 },
 ];
 const POLICY_LABEL: Record<Policy, string> = {
   settle: "Settling down",
@@ -57,7 +56,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
     // The planet type comes from the seed (seed % 5), so a chosen world just picks a matching seed.
     const seed = worldType == null ? undefined : Math.floor(Math.random() * 2e5) * PLANET_TYPES.length + worldType;
     const s = new PlanetSim(seed);
-    s.seedNations(undefined, 10, race); // 2 to 5 nations, far apart; the first is the god's chosen race
+    s.seedNations(undefined, 10, race); // 3 to 5 nations, far apart; the first is the god's chosen race
     return s;
   });
   const count = sim.nations.length;
@@ -103,6 +102,19 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
     setCivs(next);
     sim.nations[id].name = civ.name; // sim events now use the name the mind chose
   };
+  // New nations can appear mid-game (breakaways, newcomers): grow every per-nation list to match.
+  const growTo = (k: number) => {
+    const pad = <T,>(a: T[], fill: () => T) => [...a, ...Array.from({ length: Math.max(0, k - a.length) }, fill)];
+    civsRef.current = pad(civsRef.current, () => null);
+    setCivs(civsRef.current);
+    chatsRef.current = pad(chatsRef.current, () => []);
+    setChats(chatsRef.current);
+    leaderChatsRef.current = pad(leaderChatsRef.current, () => []);
+    setLeaderChats(leaderChatsRef.current);
+    setReasons((r) => pad(r, () => ""));
+    setMoods((m) => pad(m, () => "pleased" as Mood));
+    lastThought.current = pad(lastThought.current, () => Date.now());
+  };
   const addChat = (id: number, m: MindMessage) => {
     const next = chatsRef.current.map((c, i) => (i === id ? [...c, m].slice(-30) : c));
     chatsRef.current = next;
@@ -116,7 +128,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
       const info = sim.nationInfo()[id];
       return {
         id: "local",
-        year: sim.year,
+        year: sim.calendar,
         stats: sim.stats(),
         needs: info.needs,
         crisis: info.crisis,
@@ -200,6 +212,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
   useEffect(() => {
     const lastCrisis: (Crisis | null)[] = new Array(count).fill(null);
     const id = setInterval(() => {
+      if (civsRef.current.length < sim.nations.length) growTo(sim.nations.length);
       const h = readHud(sim);
       setHud(h);
       for (const e of sim.events.splice(0)) {
@@ -246,7 +259,6 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
     if (!text || !civs[sel]) return;
     setDraft("");
     addChat(sel, { from: "god", text });
-    sim.nations[sel].faith = Math.min(100, sim.nations[sel].faith + 15); // being spoken to by their god renews their faith
     answerDue.current = sel;
     pump();
   };
@@ -265,12 +277,12 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
       const who = `${nt.leader.title} ${nt.leader.name}`;
       if (r.policy && r.policy !== nt.policy) {
         nt.policy = r.policy;
-        addEntry({ year: sim.year, kind: "mind", nation: id, text: `${who} orders ${cap(nt.name)} to turn to ${POLICY_LABEL[r.policy].toLowerCase()}.` });
+        addEntry({ year: sim.calendar, kind: "mind", nation: id, text: `${who} orders ${cap(nt.name)} to turn to ${POLICY_LABEL[r.policy].toLowerCase()}.` });
       }
       const other = r.toward && sim.nations.find((o) => o.id !== id && o.alive && o.name.toLowerCase() === r.toward!.nation.toLowerCase());
       if (other) {
         sim.sway(id, other.id, r.toward!.stance === "hostile" ? 12 : -12); // a ruler's word counts for more than the mind's
-        addEntry({ year: sim.year, kind: "diplomacy", nation: id, text: `${who} ${r.toward!.stance === "hostile" ? "swears vengeance on" : "sends gifts to"} ${cap(other.name)}.` });
+        addEntry({ year: sim.calendar, kind: "diplomacy", nation: id, text: `${who} ${r.toward!.stance === "hostile" ? "swears vengeance on" : "sends gifts to"} ${cap(other.name)}.` });
       }
     } finally {
       setLeaderBusy(false);
@@ -288,7 +300,6 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
     const next = leaderChatsRef.current.map((c, i) => (i === id ? history : c));
     leaderChatsRef.current = next;
     setLeaderChats(next);
-    sim.nations[id].faith = Math.min(100, sim.nations[id].faith + 10); // their god appeared to their king
     askLeader(id, history);
   };
 
@@ -297,7 +308,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
     if (!sim.buy(id)) return;
     const u = UPGRADES.find((x) => x.id === id)!;
     const text = `The god gave the planet ${u.name.toLowerCase()} (level ${sim.levels[id]}): ${u.effect.toLowerCase()}.`;
-    addEntry({ year: sim.year, kind: "milestone", text: `You built ${u.name.toLowerCase()} (level ${sim.levels[id]}). ${u.effect}.` });
+    addEntry({ year: sim.calendar, kind: "milestone", text: `You built ${u.name.toLowerCase()} (level ${sim.levels[id]}). ${u.effect}.` });
     sim.events.push({ kind: "milestone", detail: text, nation: sel });
     setHud(readHud(sim));
   };
@@ -317,7 +328,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
       <aside className="glass absolute bottom-4 left-4 top-4 flex w-64 flex-col gap-4 overflow-y-auto p-4">
         <div>
           <p className="label">
-            Year {Math.floor(hud.year)} · God: {playerName}
+            Year {Math.floor(hud.year / SECONDS_PER_YEAR)} · God: {playerName}
           </p>
           <p className="truncate text-2xl font-semibold" title={planetName}>{planetName}</p>
           <p className="text-xs text-white/55">
@@ -351,7 +362,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
         </div>
         {/* Map key for the coloured specks on the globe (see DEPOSIT in Globe.tsx) */}
         <div className="-mt-2 flex justify-between text-[11px] text-white/50">
-          {[["#5b6f8f", "Metal"], ["#ffd447", "Gold"], ["#3fd6b0", "Herbs"]].map(([c, label]) => (
+          {[["#ffd447", "Gold"]].map(([c, label]) => (
             <span key={label} className="flex items-center gap-1">
               <span className="h-2 w-2 rounded-sm" style={{ background: c }} />
               {label} deposits
@@ -359,9 +370,12 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
           ))}
         </div>
         <div>
-          <p className="label mb-1.5">Nations ({hud.nations.filter((n) => n.alive).length})</p>
+          <p className="label mb-1.5">
+            Nations ({hud.nations.filter((n) => n.alive).length})
+            {hud.nations.some((n) => !n.alive) && <span className="normal-case text-white/40"> · {hud.nations.filter((n) => !n.alive).length} fallen</span>}
+          </p>
           <ul className="space-y-1">
-            {hud.nations.map((n) => (
+            {hud.nations.filter((n) => n.alive).map((n) => (
               <li key={n.id}>
                 <button
                   onClick={() => {
@@ -594,7 +608,6 @@ function Stock({ icon, label, value }: { icon: string; label: string; value: num
 function NeedBars({ needs, crisis }: { needs: Needs; crisis: Crisis | null }) {
   const bars: [string, number][] = [
     ["Food", needs.food],
-    ["Faith", needs.faith],
     ["Stability", needs.stability],
   ];
   return (

@@ -101,9 +101,22 @@ const FATE_ICONS: Record<GodPower, string> = {
 // A tsunami ring spreading from `face`; a meteor falling towards `face`; an erupting volcano at `face`.
 export type Wave = { id: number; face: number; at: number; r: number };
 export type Meteor = { id: number; face: number; at: number; radius: number; fall: number; natural: boolean };
-export type Volcano = { id: number; face: number; at: number; life: number; nextBurst: number };
+// Volcanoes stay on the map. Most of the time they sleep; `active` while erupting, then dormant until `wakeAt`.
+export type Volcano = { id: number; face: number; active: boolean; at: number; life: number; nextBurst: number; wakeAt: number };
 // The latest thing that happened, for the HUD's pop-up.
 export type Alert = { icon: string; title: string; text: string; at: number; face: number };
+
+// The sim runs in fast ticks (one per real second); a calendar year is this many of them.
+export const SECONDS_PER_YEAR = 25;
+export const MIN_NATIONS = 3; // newcomers arrive whenever fewer than this are left
+const MAX_NATIONS = 10; // alive at once (more over time: the fallen make room)
+// Nations after the first five get a neon colour from the golden angle, skipping yellows and greens that blend with land.
+export function nationColor(i: number) {
+  if (i < NATION_COLORS.length) return NATION_COLORS[i];
+  let h = (200 + i * 137.508) % 360;
+  if (h > 35 && h < 160) h = (h + 140) % 360;
+  return `hsl(${Math.round(h)}, 100%, 62%)`;
+}
 
 export const NATION_COLORS = ["#ff2bd6", "#00f0ff", "#a24dff", "#ff1f4b", "#3d5aff"]; // neon, so borders pop against the terrain
 const NATION_HUES = ["Rose", "Azure", "Violet", "Crimson", "Cobalt"]; // placeholder names until each mind names itself
@@ -181,7 +194,7 @@ export class PlanetSim {
   // Between every pair of nations: how they stand and how much tension has built up (0-100).
   relation: Relation[][] = [];
   tension: number[][] = [];
-  owner: Int8Array; // which nation's land each tile is, -1 = nobody's
+  owner: Int16Array; // which nation's land each tile is, -1 = nobody's
   private contact: number[][] = []; // how many border tiles each pair of nations shares
   private borderTimer = 0;
   // Stockpiled resources: the planet's score, and later what it trades with other planets.
@@ -248,7 +261,7 @@ export class PlanetSim {
     this.farm = new Uint8Array(this.n);
     this.terrain = new Uint8Array(this.n);
     this.deposit = new Uint8Array(this.n);
-    this.owner = new Int8Array(this.n).fill(-1);
+    this.owner = new Int16Array(this.n).fill(-1);
     this.generate();
   }
 
@@ -284,11 +297,32 @@ export class PlanetSim {
       const vein = fbm(x * 6, y * 6, z * 6, this.seed + 4242, 3);
       const t = this.terrain[f] as T;
       const k = this.type.deposits;
-      if (t === T.Rock && vein > 0.66 - 0.04 * k) this.deposit[f] = vein > 0.72 - 0.03 * k ? D.Gold : D.Metal;
+      // Only gold shows as deposits; metal is mined from any mountain and herbs gathered in any forest.
+      if (t === T.Rock && vein > 0.72 - 0.03 * k) this.deposit[f] = D.Gold;
       else if ((t === T.Grass || t === T.Desert) && this.elevation[f] > 0.25 && vein > 0.7 - 0.03 * k) this.deposit[f] = D.Gold;
-      else if (t === T.Forest && vein > 0.64 - 0.04 * k) this.deposit[f] = D.Herbs;
     }
+    this.seedVolcanoes();
     this.version++;
+  }
+
+  // A few dormant volcanoes on the highest, well-separated peaks (more on volcanic planets).
+  private seedVolcanoes() {
+    const want = 2 + (this.seed % 3) + (this.type.hazard === "volcano" ? 2 : 0);
+    const peaks = [...Array(this.n).keys()].filter((f) => this.terrain[f] === T.Rock && this.elevation[f] > 0.3).sort((a, b) => this.elevation[b] - this.elevation[a]);
+    for (const f of peaks) {
+      if (this.volcanoes.length >= want) break;
+      if (this.volcanoes.some((v) => this.angle(v.face, f) < 0.6)) continue;
+      this.raiseCone(f);
+      this.volcanoes.push({ id: this.nextId++, face: f, active: false, at: 0, life: 0, nextBurst: 0, wakeAt: 150 + tileRand(f, 9) * 450 });
+    }
+  }
+
+  private raiseCone(top: number) {
+    for (const [f, w] of this.tilesNear(top, 0.07)) {
+      this.elevation[f] = Math.min(0.66, Math.max(this.elevation[f], 0.3 + 0.32 * w * w) + 0.03 * w); // stays below the snow line
+      this.forest[f] = 0;
+      this.classify(f);
+    }
   }
 
   c(f: number): [number, number, number] {
@@ -437,8 +471,8 @@ export class PlanetSim {
 
   // ---- Nations ----
 
-  // Start 2-5 nations, each with a small band of people as far apart as the land allows.
-  seedNations(count = 2 + Math.floor(Math.random() * 4), peoplePerNation = 10, firstRace?: RaceId) {
+  // Start 3-5 nations, each with a small band of people as far apart as the land allows.
+  seedNations(count = MIN_NATIONS + Math.floor(Math.random() * 3), peoplePerNation = 10, firstRace?: RaceId) {
     const starts = [this.bestStart()];
     const candidates: number[] = [];
     for (let f = 0; f < this.n; f += 3) if (this.terrain[f] === T.Grass || this.terrain[f] === T.Forest) candidates.push(f);
@@ -457,7 +491,7 @@ export class PlanetSim {
     const pool = RACES.map((r) => r.id).filter((r) => r !== firstRace).sort(() => Math.random() - 0.5);
     const races = starts.map((_, i) => (i === 0 && firstRace ? firstRace : pool[(i - (firstRace ? 1 : 0)) % pool.length]));
     this.nations = starts.map((_, i) => ({
-      id: i, name: `the ${NATION_HUES[i]} ${RACE[races[i]].plural}`, color: NATION_COLORS[i], policy: "settle" as Policy, faith: 50, stability: 70, recentDeaths: 0, alive: true,
+      id: i, name: `the ${NATION_HUES[i]} ${RACE[races[i]].plural}`, color: NATION_COLORS[i], policy: "settle" as Policy, faith: 100, stability: 70, recentDeaths: 0, alive: true,
       race: races[i], tech: 0, leader: makeLeader(RACE[races[i]]),
     }));
     const k = this.nations.length;
@@ -550,6 +584,7 @@ export class PlanetSim {
     this.stepPeople(dt);
     this.stepVillages(dt);
     this.stepNations(dt);
+    this.stepNationLife(dt);
     this.stepNeeds(dt);
     this.stepWeather(dt);
     this.stepCatastrophes(dt);
@@ -650,11 +685,12 @@ export class PlanetSim {
             this.version++;
           }
         }
-        if (t === T.Rock) this.gain("stone", 0.05 * peace * y.stone * ry("stone") * tools);
-        const d = this.deposit[p.face] as D;
-        if (d === D.Metal) this.gain("metal", 0.06 * peace * y.metal * ry("metal") * tools);
-        if (d === D.Gold) this.gain("gold", 0.03 * peace * y.gold * ry("gold"));
-        if (d === D.Herbs) this.gain("herbs", 0.02 * peace * y.herbs * ry("herbs"));
+        if (t === T.Rock) {
+          this.gain("stone", 0.05 * peace * y.stone * ry("stone") * tools);
+          this.gain("metal", 0.02 * peace * y.metal * ry("metal") * tools); // ore from the mountainside
+        }
+        if (t === T.Forest) this.gain("herbs", 0.006 * peace * y.herbs * ry("herbs")); // medicinal plants from the woods
+        if (this.deposit[p.face] === D.Gold) this.gain("gold", 0.03 * peace * y.gold * ry("gold"));
       }
 
       // War: fight any enemy on this tile or the next one. Either side may fall.
@@ -683,7 +719,7 @@ export class PlanetSim {
         const free = this.owner[p.face] < 0 || this.owner[p.face] === p.nation;
         const own = this.villages.find((v) => v.nation === p.nation && this.angle(v.face, p.face) < VILLAGE_RANGE * 0.5);
         if (own) p.village = own.id;
-        else if (free && (this.terrain[p.face] === T.Grass || this.terrain[p.face] === T.Forest || this.terrain[p.face] === T.Sand)) p.village = this.foundVillage(p.face, p.nation).id;
+        else if (free && this.joinsUp(p.face, p.nation) && (this.terrain[p.face] === T.Grass || this.terrain[p.face] === T.Forest || this.terrain[p.face] === T.Sand)) p.village = this.foundVillage(p.face, p.nation).id;
         p.goal = undefined;
       }
       const march = target[p.nation];
@@ -722,7 +758,7 @@ export class PlanetSim {
         const near = this.villages.find((v) => v.nation === p.nation && this.angle(v.face, p.face) < range);
         const claimed = this.owner[p.face] >= 0 && this.owner[p.face] !== p.nation;
         if (near) p.village = near.id;
-        else if (!claimed && (this.terrain[p.face] === T.Grass || this.terrain[p.face] === T.Forest) && Math.random() < (pol === "expand" ? 0.15 : 0.04)) {
+        else if (!claimed && this.joinsUp(p.face, p.nation) && (this.terrain[p.face] === T.Grass || this.terrain[p.face] === T.Forest) && Math.random() < (pol === "expand" ? 0.15 : 0.04)) {
           const v = this.foundVillage(p.face, p.nation);
           p.village = v.id;
         }
@@ -745,6 +781,10 @@ export class PlanetSim {
       let goal = -1, best = -Infinity;
       for (const [f, w] of this.tilesNear(v.face, VILLAGE_RANGE * 2)) {
         if (w > 0.45 || this.owner[f] >= 0 || (this.terrain[f] !== T.Grass && this.terrain[f] !== T.Forest)) continue;
+        // Only right on the edge of their own land, so a nation is always one joined-up area.
+        let frontier = false;
+        for (let k = 0; k < 3; k++) if (this.owner[this.neighbours[f * 3 + k]] === v.nation) frontier = true;
+        if (!frontier) continue;
         const score = this.food[f] + this.moisture[f] + Math.random() * 0.5;
         if (score > best) {
           best = score;
@@ -868,7 +908,7 @@ export class PlanetSim {
   // Each village claims the land around it (more as it grows). Where claims meet,
   // the nearer village wins: a breadth-first flood from every village at once.
   private updateBorders() {
-    const owner = new Int8Array(this.n).fill(-1);
+    const owner = new Int16Array(this.n).fill(-1);
     const depth = new Int16Array(this.n);
     const reach = new Int16Array(this.n);
     const queue: number[] = [];
@@ -921,10 +961,219 @@ export class PlanetSim {
           v.nation = n;
           this.nations[from].stability -= 10;
           this.events.push({ kind: "captured", detail: `${this.nationName(n)} captured ${v.name} from ${this.nationName(from)}.`, nation: from, other: n });
+          this.conqueror.set(from, n);
           break;
         }
       }
     }
+  }
+
+  // The year shown to players and the minds (the sim's own clock runs much faster).
+  get calendar() {
+    return this.year / SECONDS_PER_YEAR;
+  }
+
+  // ---- Continents: every big landmass gets a name (worked out once, from the starting map) ----
+
+  private _continents: { name: string; face: number; size: number }[] | null = null;
+  continents() {
+    if (this._continents) return this._continents;
+    const seen = new Int32Array(this.n).fill(-1);
+    const out: { name: string; face: number; size: number }[] = [];
+    const A = ["Ael", "Bor", "Cyr", "Dra", "Eld", "Fal", "Gal", "Hes", "Ith", "Kor", "Lum", "Myr", "Nor", "Ost", "Pyr", "Ryn", "Sol", "Tal", "Vel", "Wyn", "Zan"];
+    const B = ["ia", "os", "ara", "eth", "on", "ura", "ond", "is", "ea", "ar", "oria", "andi"];
+    const used = new Set<string>();
+    for (let f0 = 0; f0 < this.n; f0++) {
+      if (seen[f0] >= 0 || isWater(this.terrain[f0] as T)) continue;
+      const tiles = [f0];
+      seen[f0] = out.length;
+      for (let i = 0; i < tiles.length; i++)
+        for (let k = 0; k < 3; k++) {
+          const nb = this.neighbours[tiles[i] * 3 + k];
+          if (seen[nb] < 0 && !isWater(this.terrain[nb] as T)) {
+            seen[nb] = out.length;
+            tiles.push(nb);
+          }
+        }
+      if (tiles.length < 120) {
+        out.push({ name: "", face: f0, size: tiles.length }); // islands keep their slot but no name
+        continue;
+      }
+      // Label it at the tile nearest the landmass's middle.
+      let x = 0, y = 0, z = 0;
+      for (const f of tiles) {
+        x += this.centroids[f * 3];
+        y += this.centroids[f * 3 + 1];
+        z += this.centroids[f * 3 + 2];
+      }
+      let face = tiles[0], best = -2;
+      for (const f of tiles) {
+        const d = this.centroids[f * 3] * x + this.centroids[f * 3 + 1] * y + this.centroids[f * 3 + 2] * z;
+        if (d > best) [face, best] = [f, d];
+      }
+      let name = "";
+      for (let i = 0; i < 20 && (!name || used.has(name)); i++) name = A[Math.floor(tileRand(f0, i) * A.length)] + B[Math.floor(tileRand(f0, i + 50) * B.length)];
+      used.add(name);
+      out.push({ name, face, size: tiles.length });
+    }
+    this._continents = out.filter((c) => c.name);
+    return this._continents;
+  }
+
+  // ---- Nations come and go ----
+
+  // A new nation: grows every nation-by-nation table by one row and column.
+  addNation(name?: string) {
+    const id = this.nations.length;
+    const sounds = SOUNDS[id % SOUNDS.length];
+    const word = sounds.start[Math.floor(Math.random() * sounds.start.length)] + sounds.end[Math.floor(Math.random() * sounds.end.length)];
+    const race = RACES[Math.floor(Math.random() * RACES.length)].id;
+    this.nations.push({
+      id, name: name ?? `the ${word} ${RACE[race].plural}`, color: nationColor(id), policy: "settle", faith: 100, stability: 60, recentDeaths: 0, alive: true,
+      race, tech: Math.max(0, ...this.nations.filter((n) => n.alive).map((n) => n.tech)) * 0.5, leader: makeLeader(RACE[race]),
+    });
+    for (const row of this.relation) row.push("peace");
+    for (const row of this.tension) row.push(40);
+    for (const row of this.contact) row.push(0);
+    this.relation.push(new Array<Relation>(id + 1).fill("peace"));
+    this.tension.push(new Array<number>(id + 1).fill(40));
+    this.contact.push(new Array<number>(id + 1).fill(0));
+    this.tension[id][id] = 0;
+    return id;
+  }
+
+  private nationTimer = 1;
+  private lastSplit = -99;
+  private conqueror = new Map<number, number>(); // who last took a settlement from each nation
+
+  private stepNationLife(dt: number) {
+    this.nationTimer -= dt;
+    if (this.nationTimer > 0) return;
+    this.nationTimer = 1;
+    const alive = () => this.nations.filter((n) => n.alive);
+
+    // A beaten nation with no settlements left is wiped out: its stragglers join the victor.
+    for (const nt of alive()) {
+      const mine = this.villages.filter((v) => v.nation === nt.id).length;
+      const people = this.people.filter((p) => p.nation === nt.id);
+      if (mine > 0 || people.length >= 6 || this.year < 20) continue;
+      const victor = this.conqueror.get(nt.id) ?? (people.length ? this.nearestOtherNation(people[0].face, nt.id) : -1);
+      if (victor >= 0 && this.nations[victor]?.alive) for (const p of people) p.nation = victor;
+      else this.killWhere((p) => p.nation === nt.id);
+      nt.alive = false;
+      const by = victor >= 0 ? ` by ${this.nationName(victor)}` : "";
+      this.events.push({ kind: "fallen", detail: `${nt.name} has been wiped out${by}.`, nation: nt.id, other: victor >= 0 ? victor : undefined });
+      this.announce("💀", "A nation falls", `${cap(nt.name)} has been wiped out${by}.`, people[0]?.face ?? 0);
+    }
+
+    // Too few nations: wanderers arrive on empty land and found a new one.
+    if (alive().length < MIN_NATIONS && this.people.length < MAX_PEOPLE - 20) {
+      const home = this.emptiestLand();
+      const id = this.addNation();
+      for (let j = 0; j < 10; j++) this.spawnNear(home, id);
+      this.events.push({ kind: "village", detail: `Wanderers arrive from beyond the sea and settle near the coast.`, nation: id });
+      this.announce("⛵", "Newcomers", `A new people, ${this.nationName(id)}, arrive and settle on empty land.`, home);
+    }
+
+    // Land that has been cut off from the capital (by war or disaster) can't stay part of the nation.
+    for (const nt of alive()) {
+      const cut = this.cutOff(nt.id);
+      if (!cut.length) continue;
+      if (alive().length < MAX_NATIONS) this.splitOff(nt.id, cut, false, "cut off");
+      else {
+        // No room for another nation: the cut-off settlements join whichever neighbour surrounds them.
+        for (const v of cut) {
+          const n = this.nearestOtherNation(v.face, nt.id);
+          if (n >= 0) v.nation = n;
+        }
+        this.updateBorders();
+      }
+      return;
+    }
+
+    // Breakaways: an unhappy or overgrown nation loses its farthest settlement, which declares itself a nation.
+    if (alive().length >= MAX_NATIONS || this.year - this.lastSplit < 12) return;
+    for (const nt of alive()) {
+      const mine = this.villages.filter((v) => v.nation === nt.id);
+      const capital = this.capital(nt.id);
+      if (mine.length < 2 || !capital) continue;
+      const unrest = nt.stability < 25 || nt.policy === "rebel";
+      if (!(unrest ? Math.random() < 0.25 : mine.length >= 4 && Math.random() < 0.04)) continue;
+      const far = mine.filter((v) => v !== capital).sort((a, b) => this.angle(b.face, capital.face) - this.angle(a.face, capital.face))[0];
+      this.splitOff(nt.id, [far], unrest, unrest ? "civil war" : "independence");
+      break;
+    }
+  }
+
+  // Can this nation found a settlement here without leaving a gap? Its first one can go anywhere;
+  // after that, only on or right next to its own land.
+  private joinsUp(f: number, nation: number) {
+    if (!this.villages.some((v) => v.nation === nation)) return true;
+    if (this.owner[f] === nation) return true;
+    for (let k = 0; k < 3; k++) if (this.owner[this.neighbours[f * 3 + k]] === nation) return true;
+    return false;
+  }
+
+  // Settlements of a nation whose land no longer touches the capital's.
+  private cutOff(id: number) {
+    const capital = this.capital(id);
+    if (!capital || this.owner[capital.face] !== id) return [];
+    const seen = new Uint8Array(this.n);
+    const queue = [capital.face];
+    seen[capital.face] = 1;
+    for (let i = 0; i < queue.length; i++) {
+      for (let k = 0; k < 3; k++) {
+        const nb = this.neighbours[queue[i] * 3 + k];
+        if (!seen[nb] && this.owner[nb] === id) {
+          seen[nb] = 1;
+          queue.push(nb);
+        }
+      }
+    }
+    return this.villages.filter((v) => v.nation === id && this.owner[v.face] === id && !seen[v.face]);
+  }
+
+  // Some of a nation's settlements become a new nation of their own.
+  private splitOff(from: number, places: Village[], war: boolean, why: "civil war" | "independence" | "cut off") {
+    const nt = this.nations[from];
+    const id = this.addNation();
+    const ids = new Set(places.map((v) => v.id));
+    for (const v of places) v.nation = id;
+    for (const p of this.people) if ((p.village !== null && ids.has(p.village)) || (p.nation === from && places.some((v) => this.angle(p.face, v.face) < 0.06))) p.nation = id;
+    this.relation[id][from] = this.relation[from][id] = war ? "war" : "rival";
+    this.tension[id][from] = this.tension[from][id] = war ? 85 : 65;
+    nt.stability -= 10;
+    this.lastSplit = this.year;
+    const name = places[0].name;
+    this.events.push({ kind: "village", detail: `${name} broke away from ${nt.name} to found a new nation.`, nation: id });
+    const text =
+      why === "civil war" ? `${name} has risen up against ${nt.name} and formed a new nation.`
+      : why === "cut off" ? `Cut off from the rest of ${nt.name}, ${name} now rules itself.`
+      : `${name} has broken away from ${nt.name} to rule itself.`;
+    this.events.push({ kind: "diplomacy", detail: text, nation: from, other: id });
+    this.announce(war ? "⚔️" : "🏳️", why === "civil war" ? "Civil war!" : "Independence!", text, places[0].face);
+    this.updateBorders();
+  }
+
+  private nearestOtherNation(face: number, not: number) {
+    let best = -1, d = Infinity;
+    for (const p of this.people) if (p.nation !== not && this.nations[p.nation].alive) {
+      const a = this.angle(p.face, face);
+      if (a < d) [best, d] = [p.nation, a];
+    }
+    return best;
+  }
+
+  // Habitable land as far as possible from anyone.
+  private emptiestLand() {
+    let best = this.bestStart(), far = -1;
+    for (let f = 0; f < this.n; f += 11) {
+      if (this.terrain[f] !== T.Grass && this.terrain[f] !== T.Forest) continue;
+      let d = Infinity;
+      for (let i = 0; i < this.people.length; i += 4) d = Math.min(d, this.angle(this.people[i].face, f));
+      if (d > far) [best, far] = [f, d];
+    }
+    return best;
   }
 
   // Relations drift with tension. Shared borders, hunger and expansion build it; trade,
@@ -985,8 +1234,7 @@ export class PlanetSim {
     for (const nt of this.nations) {
       if (!nt.alive) continue;
       const food = this.nationFood(nt.id);
-      const decay = (nt.policy === "worship" ? 0.1 : nt.policy === "rebel" ? 1.2 : 0.3) * (1 - 0.25 * this.levels.temples) * RACE[nt.race].faithDecay;
-      nt.faith = Math.max(0, nt.faith - decay * dt);
+      nt.faith = 100; // faith is no longer a need (Frank's call): it never decays, so no cult crisis
       // Rebels burn the god's shrines now and then.
       const mine = this.villages.filter((v) => v.nation === nt.id);
       if (nt.policy === "rebel" && mine.length && Math.random() < 0.03 * dt) this.ignite(this.neighbours[mine[Math.floor(Math.random() * mine.length)].face * 3]);
@@ -1030,7 +1278,7 @@ export class PlanetSim {
     this.nextFate = 12 + Math.random() * 18;
     const bag: [GodPower, number][] = [
       ["rain", 3], ["forest", 2], ["miracle", 2], ["peace", 2], ["drought", 2], ["discord", 2],
-      ["spawn", 1], ["raise", 1], ["lower", 1], ["fire", 1], ["meteor", 1],
+      ["raise", 1], ["lower", 1], ["fire", 1], ["meteor", 1],
     ];
     let r = Math.random() * bag.reduce((t, [, w]) => t + w, 0);
     const power = bag.find(([, w]) => (r -= w) < 0)![0];
@@ -1092,19 +1340,25 @@ export class PlanetSim {
     this.announce("☄️", "Meteor incoming!", `A burning star is falling towards ${this.where(face)}.`, face);
   }
 
+  // Wake the sleeping volcano nearest `face`; only if the planet has none does a new one break through.
   startVolcano(face: number) {
-    // Erupt from the highest ground nearby.
-    let top = face;
-    for (const [f] of this.tilesNear(face, 0.12)) if (this.elevation[f] > this.elevation[top]) top = f;
-    for (const [f, w] of this.tilesNear(top, 0.07)) {
-      this.elevation[f] = Math.min(1, this.elevation[f] + 0.35 * w * w + 0.05);
-      this.forest[f] = 0;
-      this.classify(f);
+    let v = this.volcanoes.filter((x) => !x.active).sort((a, b) => this.angle(a.face, face) - this.angle(b.face, face))[0];
+    if (!v && this.volcanoes.length) return; // all already erupting
+    if (!v) {
+      let top = face;
+      for (const [f] of this.tilesNear(face, 0.12)) if (this.elevation[f] > this.elevation[top]) top = f;
+      this.raiseCone(top);
+      v = { id: this.nextId++, face: top, active: false, at: 0, life: 0, nextBurst: 0, wakeAt: 0 };
+      this.volcanoes.push(v);
     }
-    this.volcanoes.push({ id: this.nextId++, face: top, at: this.year, life: 14 + Math.random() * 8, nextBurst: 0 });
+    this.erupt(v);
+  }
+
+  private erupt(v: Volcano) {
+    Object.assign(v, { active: true, at: this.year, life: 14 + Math.random() * 8, nextBurst: 0 });
     this.version++;
-    this.announce("🌋", "Volcano!", `The ground splits open and a volcano erupts near ${this.where(top)}.`, top);
-    this.events.push({ kind: "disaster", detail: `A volcano erupted near ${this.where(top)}.`, nation: this.owner[top] >= 0 ? this.owner[top] : undefined });
+    this.announce("🌋", "Volcano!", `The volcano near ${this.where(v.face)} roars back to life.`, v.face);
+    this.events.push({ kind: "disaster", detail: `A volcano erupted near ${this.where(v.face)}.`, nation: this.owner[v.face] >= 0 ? this.owner[v.face] : undefined });
   }
 
   private stepCatastrophes(dt: number) {
@@ -1150,6 +1404,15 @@ export class PlanetSim {
 
     // Volcanoes: bursts of lava set the slopes alight and bury the land in ash.
     for (const v of this.volcanoes) {
+      if (!v.active) {
+        if (this.year >= v.wakeAt) this.erupt(v);
+        continue;
+      }
+      if (this.year - v.at >= v.life) {
+        // Back to sleep for several years.
+        Object.assign(v, { active: false, wakeAt: this.year + 400 + Math.random() * 600 });
+        continue;
+      }
       v.nextBurst -= dt;
       if (v.nextBurst > 0) continue;
       v.nextBurst = 1 + Math.random() * 1.5;
@@ -1164,7 +1427,6 @@ export class PlanetSim {
       if (killed || this.villages.length < before) this.events.push({ kind: "disaster", detail: `Lava from the volcano killed ${killed} people${this.villages.length < before ? " and buried a village" : ""}.`, nation: this.owner[v.face] >= 0 ? this.owner[v.face] : undefined });
       this.version++;
     }
-    this.volcanoes = this.volcanoes.filter((v) => this.year - v.at < v.life);
   }
 
   // ---- Weather: rain clouds and storms that drift around the planet ----
@@ -1368,7 +1630,6 @@ export class PlanetSim {
     const n = this.nationNeeds(id);
     if (n.food < 30) return "famine";
     if (n.stability < 20) return "revolution";
-    if (n.faith < 5) return "cult";
     return null;
   }
 

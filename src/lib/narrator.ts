@@ -12,7 +12,7 @@ function describe(w: World): string {
     `A ${s.planetType} planet. Year ${Math.floor(w.year)}. Population ${s.population} in ${s.villages} villages.`,
     `Stockpile: ${Object.entries(s.resources).map(([k, v]) => `${v} ${k}`).join(", ")}.`,
     `Planet surface: ${s.ocean}% ocean, ${s.forest}% forest, ${s.desert}% desert, ${s.mountains}% mountains.`,
-    `Needs (0-100): food ${Math.round(w.needs.food)}, faith ${Math.round(w.needs.faith)}, stability ${Math.round(w.needs.stability)}.`,
+    `Needs (0-100): food ${Math.round(w.needs.food)}, stability ${Math.round(w.needs.stability)}.`,
     w.crisis ? `CURRENT CRISIS: ${w.crisis}.` : "",
     `Current focus: ${w.policy}.`,
     w.nation?.race ? `YOUR people are ${RACE[w.nation.race].plural}. Speak the way ${RACE[w.nation.race].plural} do: ${RACE[w.nation.race].voice}.` : "",
