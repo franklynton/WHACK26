@@ -64,6 +64,7 @@ export default function Galaxy({
   const names = useRef(new Map<string, string>());
   const wanted = useRef<string | null>(null); // the galaxy we mean to be in (kept in the browser, so a refresh rejoins it)
   const joining = useRef(false);
+  const syncInFlight = useRef<Promise<boolean> | null>(null);
   const seen = useRef<{ galaxy: string | null; gods: Map<string, PlanetRow> } | null>(null); // to announce arrivals and departures
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [rooms, setRooms] = useState(true); // false until migration 003 is run: then everyone online shares one galaxy
@@ -170,20 +171,34 @@ export default function Galaxy({
     }
   }, [apply, join, sim, ids]);
 
-  const sync = useCallback(async () => {
-    const s = sim.stats();
-    const hash = [...ids.world].reduce((n, c) => (n * 31 + c.charCodeAt(0)) | 0, 7);
-    try {
-      const { res } = await post({
-        action: "sync", ownerName, planetName, planetType: s.planetType,
-        population: s.population, villages: s.villages, output: Math.round(sim.output), military: sim.military(), resources: s.resources,
-        positionX: (hash & 0xffff) / 0xffff, positionY: ((hash >>> 16) & 0xffff) / 0xffff,
-      });
-      if (res.status === 503) return setEnabled(false);
-      await load();
-    } catch {
-      setEnabled(false);
-    }
+  const sync = useCallback(() => {
+    if (syncInFlight.current) return syncInFlight.current;
+    const request = (async () => {
+      const s = sim.stats();
+      const hash = [...ids.world].reduce((n, c) => (n * 31 + c.charCodeAt(0)) | 0, 7);
+      try {
+        const { res } = await post({
+          action: "sync", ownerName, planetName, planetType: s.planetType,
+          population: s.population, villages: s.villages, output: Math.round(sim.output), military: sim.military(), resources: s.resources,
+          positionX: (hash & 0xffff) / 0xffff, positionY: ((hash >>> 16) & 0xffff) / 0xffff,
+        });
+        if (res.status === 503) {
+          setEnabled(false);
+          return false;
+        }
+        await load();
+        return res.ok;
+      } catch {
+        setEnabled(false);
+        return false;
+      }
+    })();
+    syncInFlight.current = request;
+    request.then(
+      () => { if (syncInFlight.current === request) syncInFlight.current = null; },
+      () => { if (syncInFlight.current === request) syncInFlight.current = null; },
+    );
+    return request;
   }, [sim, ownerName, planetName, load, post, ids]);
 
   useEffect(() => {

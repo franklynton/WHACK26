@@ -3,7 +3,7 @@
 // the people as tiny instanced figures and the villages as clusters of houses.
 // Left-drag paints with the current power; right-drag (or the Hand tool) rotates.
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
-import { Html, OrbitControls, Stars } from "@react-three/drei";
+import { Html, OrbitControls, Stars, Text } from "@react-three/drei";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { D, isWater, PlanetSim, T } from "@/sim/planet";
@@ -650,27 +650,36 @@ function Cities({ sim }: { sim: PlanetSim }) {
 function ContinentLabels({ sim }: { sim: PlanetSim }) {
   const camera = useThree((s) => s.camera);
   const list = useMemo(() => sim.continents(), [sim]);
-  const refs = useRef<(HTMLDivElement | null)[]>([]);
+  const refs = useRef<Array<{ material?: { opacity: number; transparent: boolean } } | null>>([]);
   const cam = useMemo(() => new THREE.Vector3(), []);
   useFrame(() => {
     cam.copy(camera.position).normalize();
     const far = camera.position.length();
     list.forEach((c, k) => {
       const el = refs.current[k];
-      if (!el) return;
+      if (!el?.material) return;
       const d = sim.centroids[c.face * 3] * cam.x + sim.centroids[c.face * 3 + 1] * cam.y + sim.centroids[c.face * 3 + 2] * cam.z;
       // Shown when facing you, and only from a distance (they'd crowd the villages up close).
-      el.style.opacity = String(Math.max(0, Math.min(1, (d - 0.3) * 2.5)) * Math.max(0, Math.min(1, (far - 1.7) * 2)) * 0.85);
+      el.material.opacity = Math.max(0, Math.min(1, (d - 0.3) * 2.5)) * Math.max(0, Math.min(1, (far - 1.7) * 2)) * 0.85;
+      el.material.transparent = true;
     });
   });
   return (
     <>
       {list.map((c, k) => (
-        <Html key={c.name} position={surface(sim, c.face, new THREE.Vector3()).multiplyScalar(1.02)} center zIndexRange={[5, 0]} style={{ pointerEvents: "none" }}>
-          <div ref={(el) => { refs.current[k] = el; }} className="continent-label">
-            {c.name}
-          </div>
-        </Html>
+        <Text
+          key={c.name}
+          ref={(el) => { refs.current[k] = el; }}
+          position={surface(sim, c.face, new THREE.Vector3()).multiplyScalar(1.02)}
+          fontSize={0.045}
+          color="#dce8f5"
+          anchorX="center"
+          anchorY="middle"
+          outlineWidth={0.002}
+          outlineColor="#08111f"
+        >
+          {c.name}
+        </Text>
       ))}
     </>
   );
