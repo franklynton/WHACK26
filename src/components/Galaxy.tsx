@@ -445,7 +445,7 @@ export default function Galaxy({
   );
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="glass max-h-[82vh] w-[44rem] overflow-y-auto p-4" onClick={(e) => e.stopPropagation()}>
+      <div className="glass subtle-scrollbar max-h-[82vh] w-[44rem] overflow-y-auto p-4" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between border-b border-white/10 pb-3">
           <div>
             <p className="text-lg font-bold">🌌 Galaxy</p>

@@ -632,7 +632,7 @@ export default function Game({
       </div>
 
       {/* The planet and its nations */}
-      <aside className="glass absolute bottom-4 left-4 top-4 flex w-64 flex-col gap-4 overflow-y-auto p-4">
+      <aside className="glass subtle-scrollbar absolute bottom-4 left-4 top-4 flex w-64 flex-col gap-4 overflow-y-auto p-4">
         <div>
           <p className="label">
             Year {Math.floor(hud.year / SECONDS_PER_YEAR)} · God: {playerName}
@@ -1052,7 +1052,7 @@ export default function Game({
       )}
 
       {/* The chosen nation's mind */}
-      <aside className="glass absolute bottom-4 right-4 top-4 flex w-72 flex-col p-4">
+      <aside className="glass subtle-scrollbar absolute bottom-4 right-4 top-4 flex w-72 flex-col p-4">
         <div className="mb-3 space-y-2 border-b border-white/10 pb-3 text-sm">
           <div className="flex items-center gap-2">
             <span
@@ -1182,7 +1182,7 @@ export default function Game({
             <span className="animate-pulse">· writing…</span>
           )}
         </p>
-        <ol className="flex-1 space-y-3 overflow-y-auto text-sm">
+        <ol className="subtle-scrollbar flex-1 space-y-3 overflow-y-auto text-sm">
           {[...chronicle].reverse().map((c, i) => (
             <li key={chronicle.length - i}>
               {c.nation != null && (

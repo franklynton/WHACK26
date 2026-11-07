@@ -13,6 +13,27 @@ body {
   border-radius: 1rem;
   backdrop-filter: blur(14px);
 }
+.subtle-scrollbar {
+  scrollbar-color: rgba(148, 163, 184, 0.42) transparent;
+  scrollbar-width: thin;
+}
+.subtle-scrollbar::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+.subtle-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.subtle-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.42);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+.subtle-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(186, 230, 253, 0.62);
+  background-clip: padding-box;
+}
 .label {
   font-size: 0.7rem;
   text-transform: uppercase;

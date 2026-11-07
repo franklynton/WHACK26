@@ -87,7 +87,7 @@ export default function LeaderDialog({
               ✕
             </button>
           </div>
-          <div className="flex-1 space-y-4 overflow-y-auto pr-1">
+          <div className="subtle-scrollbar flex-1 space-y-4 overflow-y-auto pr-1">
             {chat.map((m, i) =>
               m.from === "leader" ? (
                 <div key={i} className="max-w-[85%]">
