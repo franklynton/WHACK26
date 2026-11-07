@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PlanetSim } from "@/sim/planet";
 import type { Resources } from "@/types/world";
-import { CODE_RULE, GALAXY_MAX, cleanCode, joinError, setWantedGalaxy, shareLink, typeCode, wantedGalaxy } from "@/lib/galaxyCode";
+import { CODE_RULE, GALAXY_MAX, cleanCode, joinError, setWantedGalaxy, typeCode, wantedGalaxy } from "@/lib/galaxyCode";
 
 // Multiplayer: every planet syncs a snapshot to Supabase (through /api/galaxy) every few seconds.
 // Galaxies are temporary rooms of up to 5 gods, named by a code: the first god to use a code creates it,
@@ -213,15 +213,7 @@ export default function Galaxy({
     setMessage(`You left galaxy ${was} and are playing alone. Your planet keeps everything it traded, won or lost.`);
   };
 
-  const copyLink = async () => {
-    if (!galaxy) return;
-    try {
-      await navigator.clipboard.writeText(shareLink(galaxy));
-      setMessage("Link copied.");
-    } catch {
-      setMessage(shareLink(galaxy));
-    }
-  };
+
 
   const act = async (action: "trade" | "invasion", target: string) => {
     if (alone) return setMessage("You're playing alone. Join a galaxy to trade or invade.");
@@ -318,9 +310,6 @@ export default function Galaxy({
                 </span>
               </p>
               <div className="flex gap-3">
-                <button onClick={copyLink} className="text-xs text-sky-300 hover:text-sky-200">
-                  Copy link
-                </button>
                 <button
                   onClick={() => {
                     setSwitching((v) => !v);
@@ -365,7 +354,7 @@ export default function Galaxy({
         )}
 
         {enabled && !alone && planets.length === 0 && (
-          <p className="text-sm text-white/50">You&apos;re the only god here{galaxy ? `. Share the code ${galaxy} (or the link) so others can join` : ""}.</p>
+          <p className="text-sm text-white/50">You&apos;re the only god here{galaxy ? `. Share the code ${galaxy} so others can join` : ""}.</p>
         )}
         {enabled && !spacefaring && shown.length > 0 && <p className="mb-2 text-xs text-white/45">🔒 Trading and invading unlock when your people reach the Space Age.</p>}
         {enabled && shown.length > 0 && (
