@@ -99,7 +99,7 @@ export interface NationInfo {
   tech: number; // progress towards space
   ships?: number; // warships in its navy (from the Iron Age)
   love?: number; // 0..100: how much this nation loves its god
-  era: number; // index into ERAS (0 = Stone Age, 4 = Space Age)
+  era: number; // index into ERAS (0 = Stone Age, 7 = Space Age)
   leader: Leader;
   needs: Needs;
   crisis: Crisis | null;

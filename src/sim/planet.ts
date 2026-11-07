@@ -1021,6 +1021,7 @@ export class PlanetSim {
   prayers: Prayer[] = [];
   choice: Choice | null = null;
   outcome: { won: boolean; title: string; text: string } | null = null;
+  spacefaring = false; // your nation has reached the Space Age, which unlocks the galaxy (multiplayer)
   private nextPrayer = 25;
 
   loveOf(id: number) {
@@ -1738,6 +1739,11 @@ export class PlanetSim {
       this.events.push({ kind: "milestone", detail: text, nation: nt.id });
       const home = this.nationHome(nt.id);
       if (home != null) this.announce(space ? "🚀" : "📜", space ? "The Space Age" : `The ${ERAS[after]}`, text, home, true);
+      // Your own nation reaching space unlocks travel to other players' planets (multiplayer).
+      if (space && nt.id === 0 && !this.spacefaring) {
+        this.spacefaring = true;
+        if (home != null) this.announce("🚀", "Multiplayer unlocked", `${cap(nt.name)} can travel to other worlds. Open the galaxy to meet other gods' planets.`, home);
+      }
     }
   }
 
