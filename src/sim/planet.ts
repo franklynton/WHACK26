@@ -594,7 +594,16 @@ export class PlanetSim {
           this.gain("food", 0.1 * peace * this.type.yield.food * (1 + 0.3 * this.levels.irrigation));
         }
         const y = this.type.yield;
-        if (t === T.Forest) this.gain("wood", 0.03 * peace * y.wood * tools);
+        if (t === T.Forest) {
+          this.gain("wood", 0.03 * peace * y.wood * tools);
+          // Logging: woodcutters slowly clear the forest near home, felling the tile for a big haul.
+          if (this.angle(p.face, home.face) < 0.09 && Math.random() < 0.06) {
+            this.forest[p.face] = 0;
+            this.classify(p.face);
+            this.gain("wood", 0.6 * y.wood * tools);
+            this.version++;
+          }
+        }
         if (t === T.Rock) this.gain("stone", 0.05 * peace * y.stone * tools);
         const d = this.deposit[p.face] as D;
         if (d === D.Metal) this.gain("metal", 0.06 * peace * y.metal * tools);
@@ -746,7 +755,15 @@ export class PlanetSim {
       for (let r = 0; r <= rings; r++) {
         const nextRing: number[] = [];
         for (const f of ring) {
-          if (!isWater(this.terrain[f] as T) && this.terrain[f] !== T.Rock && this.terrain[f] !== T.Snow) farm[f] = 1;
+          if (!isWater(this.terrain[f] as T) && this.terrain[f] !== T.Rock && this.terrain[f] !== T.Snow) {
+            farm[f] = 1;
+            // Villages clear the trees off their fields to plant crops.
+            if (this.forest[f] && Math.random() < 0.02) {
+              this.forest[f] = 0;
+              this.classify(f);
+              this.version++;
+            }
+          }
           for (let k = 0; k < 3; k++) nextRing.push(this.neighbours[f * 3 + k]);
         }
         ring = nextRing;
