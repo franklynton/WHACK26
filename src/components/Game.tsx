@@ -44,7 +44,7 @@ interface Hud {
   alert: PlanetSim["alert"];
   output: number;
   military: number;
-  god: { devotion: number; ready: PlanetSim["ready"]; prayers: PlanetSim["prayers"]; choice: PlanetSim["choice"]; outcome: PlanetSim["outcome"]; avgLove: number };
+  god: { devotion: number; ready: PlanetSim["ready"]; prayers: PlanetSim["prayers"]; spacefaring: boolean; choice: PlanetSim["choice"]; outcome: PlanetSim["outcome"]; avgLove: number };
 }
 
 export default function Game({ playerName, planetName = "Arda", race, worldType }: { playerName: string; planetName?: string; race?: RaceId; worldType?: number }) {
@@ -83,6 +83,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
   const [hud, setHud] = useState<Hud>(() => readHud(sim));
   const [miracle, setMiracle] = useState<MiracleId | null>(null); // picked from the bar; click the land to cast
   const [seenOutcome, setSeenOutcome] = useState(false);
+  const [galaxy, setGalaxy] = useState(false);
   useEffect(() => {
     const esc = (e: KeyboardEvent) => e.key === "Escape" && setMiracle(null);
     window.addEventListener("keydown", esc);
@@ -451,6 +452,14 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
         </div>
         <div className="mt-auto flex items-end justify-center gap-2">
           <button
+            onClick={() => setGalaxy(true)}
+            disabled={!hud.god.spacefaring}
+            className={`rounded-lg px-2.5 py-1 text-sm transition ${hud.god.spacefaring ? "bg-indigo-400/25 font-semibold hover:bg-indigo-400/40" : "bg-white/5 opacity-50"}`}
+            title={hud.god.spacefaring ? "Travel to other players' planets" : `Locked: your nation must reach the Space Age (now in the ${ERAS[hud.nations[0]?.era ?? 0]})`}
+          >
+            {hud.god.spacefaring ? "🌌 Galaxy" : "🔒 Galaxy"}
+          </button>
+          <button
             onClick={() => setMuted((m) => !m)}
             className="rounded-lg bg-white/5 px-2.5 py-1 text-sm transition hover:bg-white/10"
             title={muted ? "Turn sound on" : "Mute"}
@@ -645,6 +654,21 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
           </div>
         </div>
       )}
+      {/* The galaxy: unlocked when your nation reaches the Space Age. Multiplayer (other players' planets) plugs in here. */}
+      {galaxy && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setGalaxy(false)}>
+          <div className="glass w-[26rem] p-6 text-center" onClick={(e) => e.stopPropagation()}>
+            <div className="text-5xl">🌌</div>
+            <h2 className="mt-3 text-2xl font-bold">The galaxy</h2>
+            <p className="mt-2 text-sm text-white/75">
+              {cap(hud.nations[0]?.name ?? "your people")} have left {planetName}. Other gods&apos; planets will appear here, to trade with, start trade wars with, or invade.
+            </p>
+            <button onClick={() => setGalaxy(false)} className="mt-5 rounded-lg bg-white/10 px-4 py-2 text-sm font-semibold hover:bg-white/20">
+              Back to {planetName}
+            </button>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
@@ -653,7 +677,7 @@ const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
 
 function readHud(sim: PlanetSim): Hud {
   return { year: sim.year, stats: sim.stats(), needs: sim.needs(), nations: sim.nationInfo(), fate: sim.fate, alert: sim.alert, output: Math.round(sim.output), military: sim.military(),
-    god: { devotion: sim.devotion, ready: { ...sim.ready }, prayers: [...sim.prayers], choice: sim.choice, outcome: sim.outcome, avgLove: sim.avgLove() } };
+    god: { devotion: sim.devotion, ready: { ...sim.ready }, prayers: [...sim.prayers], spacefaring: sim.spacefaring, choice: sim.choice, outcome: sim.outcome, avgLove: sim.avgLove() } };
 }
 
 // Calls an LLM route. If the server can't be reached (for example the static demo build,

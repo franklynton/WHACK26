@@ -88,8 +88,8 @@ export const RACE: Record<RaceId, Race> = Object.fromEntries(RACES.map((r) => [r
 
 // The ladder to the stars. Tech points come from population, stability and race;
 // humans reach the Space Age in a few minutes of play, goblins take about ten times as long.
-export const ERAS = ["Stone Age", "Bronze Age", "Iron Age", "Age of Steam", "Space Age"] as const;
-export const ERA_AT = [0, 120, 360, 800, 1500];
+export const ERAS = ["Stone Age", "Bronze Age", "Iron Age", "Medieval Age", "Renaissance", "Industrial Age", "Atomic Age", "Space Age"] as const;
+export const ERA_AT = [0, 120, 300, 520, 780, 1080, 1420, 1800];
 
 export function eraOf(tech: number) {
   let e = 0;
