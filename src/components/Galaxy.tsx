@@ -70,6 +70,8 @@ export default function Galaxy({
   const [galaxy, setGalaxy] = useState<string | null>(null);
   const [planets, setPlanets] = useState<PlanetRow[]>([]);
   const [draft, setDraft] = useState("");
+  const [switching, setSwitching] = useState(false); // the "Switch galaxy" code box is open
+  const [aloneLocal, setAloneLocal] = useState(false); // before migration 003 there are no rooms, so "Play alone" is kept here
   const [error, setError] = useState(""); // a join that failed, shown under the code box like a form error
   const [resource, setResource] = useState<keyof Resources>("gold");
   const [amount, setAmount] = useState(10);
@@ -115,6 +117,7 @@ export default function Galaxy({
           setGalaxy(c);
           setError("");
           setDraft("");
+          setSwitching(false);
           setMessage(data.created ? `You created galaxy ${c}. Share the code so others can join.` : `You joined galaxy ${c}.`);
           if (!auto) sim.galaxyNews("🌌", data.created ? "A new galaxy" : "You joined a galaxy", data.created ? `You created galaxy ${c}. Up to ${GALAXY_MAX} gods can join.` : `You joined galaxy ${c} (${data.members}/${GALAXY_MAX} gods).`);
           return true;
@@ -192,8 +195,9 @@ export default function Galaxy({
 
   // The HUD shows whether we're connected, which galaxy we're in and how full it is.
   useEffect(() => {
-    onStatus?.({ enabled, galaxy: rooms ? galaxy : null, members: galaxy || !rooms ? planets.length + 1 : 0 });
-  }, [enabled, rooms, galaxy, planets.length, onStatus]);
+    const solo = rooms ? !galaxy : aloneLocal;
+    onStatus?.({ enabled, galaxy: rooms ? galaxy : null, members: solo ? 0 : planets.length + 1 });
+  }, [enabled, rooms, galaxy, aloneLocal, planets.length, onStatus]);
 
   const leave = async () => {
     const was = galaxy;
@@ -205,7 +209,8 @@ export default function Galaxy({
     try {
       await post({ action: "leave" });
     } catch {}
-    setMessage(`You left galaxy ${was}. Your planet keeps everything it traded, won or lost.`);
+    setSwitching(false);
+    setMessage(`You left galaxy ${was} and are playing alone. Your planet keeps everything it traded, won or lost.`);
   };
 
   const copyLink = async () => {
@@ -219,6 +224,7 @@ export default function Galaxy({
   };
 
   const act = async (action: "trade" | "invasion", target: string) => {
+    if (alone) return setMessage("You're playing alone. Join a galaxy to trade or invade.");
     if (action === "trade" && sim.resources[resource] < amount) return setMessage(`You only have ${Math.floor(sim.resources[resource])} ${resource}.`);
     setMessage("Your ships set off...");
     await sync(); // so the galaxy knows what we hold right now
@@ -227,8 +233,53 @@ export default function Galaxy({
     await load(); // picks up the completed action and applies our half of it
   };
 
+  // Playing alone: in no galaxy (or, before migration 003, opted out of the shared list). No trading or invading.
+  const alone = rooms ? !galaxy : aloneLocal;
+  const shown = alone ? [] : planets;
   if (!open) return null;
   const members = planets.length + 1;
+
+  // The code box, used both to join from alone and to switch to another galaxy.
+  const codeForm = (label: string, hint: string, onCancel?: () => void) => (
+    <form
+      noValidate
+      onSubmit={(e) => {
+        e.preventDefault();
+        join(draft);
+      }}
+    >
+      <label htmlFor="galaxy-code" className="text-sm font-semibold">
+        {label}
+      </label>
+      <p className="mb-2 text-xs text-white/55">{hint}</p>
+      <div className="flex gap-2">
+        <input
+          id="galaxy-code"
+          autoFocus={!!onCancel}
+          value={draft}
+          onChange={(e) => {
+            setDraft(typeCode(e.target.value));
+            setError("");
+          }}
+          placeholder="NOTTS"
+          aria-invalid={!!error}
+          aria-describedby={error ? "galaxy-error" : undefined}
+          className={`min-w-0 flex-1 rounded-lg bg-white/10 px-3 py-1.5 font-mono text-sm uppercase outline-none placeholder:text-white/30 ${error ? "ring-1 ring-rose-400" : "focus:ring-1 focus:ring-indigo-300"}`}
+        />
+        <button className="rounded-lg bg-indigo-400/25 px-3 py-1.5 text-xs font-semibold hover:bg-indigo-400/40">Join or create</button>
+        {onCancel && (
+          <button type="button" onClick={onCancel} className="rounded-lg bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10">
+            Cancel
+          </button>
+        )}
+      </div>
+      {error && (
+        <p id="galaxy-error" role="alert" className="mt-2 text-xs text-rose-300">
+          {error}
+        </p>
+      )}
+    </form>
+  );
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
       <div className="glass max-h-[80vh] w-[28rem] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
@@ -247,42 +298,13 @@ export default function Galaxy({
         {enabled === false && <p className="mb-3 text-sm text-amber-200">{message || "The galaxy is offline: Supabase isn't configured yet."}</p>}
         {enabled && !rooms && <p className="mb-3 text-xs text-amber-200">Galaxy rooms aren&apos;t set up yet (run migration 003 in Supabase). Until then, every god online shares one galaxy.</p>}
 
-        {/* Not in a galaxy: join one by its code, or create it with a new code */}
+        {/* Playing alone (in no galaxy): join one by its code, or create it with a new code */}
         {enabled && rooms && !galaxy && (
-          <form
-            className="mb-3 rounded-lg bg-white/5 p-3"
-            noValidate
-            onSubmit={(e) => {
-              e.preventDefault();
-              join(draft);
-            }}
-          >
-            <label htmlFor="galaxy-code" className="text-sm font-semibold">
-              Join a galaxy
-            </label>
-            <p className="mb-2 text-xs text-white/55">Enter a friend&apos;s code to join their galaxy, or a new code to create one. Up to {GALAXY_MAX} gods per galaxy.</p>
-            <div className="flex gap-2">
-              <input
-                id="galaxy-code"
-                value={draft}
-                onChange={(e) => {
-                  setDraft(typeCode(e.target.value));
-                  setError("");
-                }}
-                placeholder="NOTTS"
-                aria-invalid={!!error}
-                aria-describedby={error ? "galaxy-error" : undefined}
-                className={`flex-1 rounded-lg bg-white/10 px-3 py-1.5 font-mono text-sm uppercase outline-none placeholder:text-white/30 ${error ? "ring-1 ring-rose-400" : "focus:ring-1 focus:ring-indigo-300"}`}
-              />
-              <button className="rounded-lg bg-indigo-400/25 px-3 py-1.5 text-xs font-semibold hover:bg-indigo-400/40">Join or create</button>
-            </div>
-            {error && (
-              <p id="galaxy-error" role="alert" className="mt-2 text-xs text-rose-300">
-                {error}
-              </p>
-            )}
+          <div className="mb-3 rounded-lg bg-white/5 p-3">
+            <p className="mb-2 text-xs text-white/60">🧘 You&apos;re playing alone, so trading and invading are off.</p>
+            {codeForm("Join a galaxy", `Enter a friend's code to join their galaxy, or a new code to create one. Up to ${GALAXY_MAX} gods per galaxy.`)}
             {message && !error && <p className="mt-2 text-xs text-sky-200">{message}</p>}
-          </form>
+          </div>
         )}
 
         {/* In a galaxy: who's here, how full it is, and a way out */}
@@ -299,8 +321,19 @@ export default function Galaxy({
                 <button onClick={copyLink} className="text-xs text-sky-300 hover:text-sky-200">
                   Copy link
                 </button>
-                <button onClick={leave} className="text-xs text-rose-300 hover:text-rose-200">
-                  Leave
+                <button
+                  onClick={() => {
+                    setSwitching((v) => !v);
+                    setDraft("");
+                    setError("");
+                  }}
+                  className="text-xs text-indigo-200 hover:text-white"
+                  title="Leave this galaxy and join or create another"
+                >
+                  Switch
+                </button>
+                <button onClick={leave} className="text-xs text-rose-300 hover:text-rose-200" title="Leave the galaxy and play on your own (no trading or invading)">
+                  Play alone
                 </button>
               </div>
             </div>
@@ -309,15 +342,33 @@ export default function Galaxy({
                 <span key={i} className={`h-1.5 flex-1 rounded-full ${i < members ? "bg-indigo-300" : "bg-white/10"}`} />
               ))}
             </div>
-            {message && <p className="mt-2 text-xs text-sky-200">{message}</p>}
+            {switching && (
+              <div className="mt-3 border-t border-white/10 pt-3">
+                {codeForm("Switch galaxy", `You'll leave ${galaxy} and join this one. If it's full, you stay in ${galaxy}.`, () => {
+                  setSwitching(false);
+                  setError("");
+                })}
+              </div>
+            )}
+            {message && !error && <p className="mt-2 text-xs text-sky-200">{message}</p>}
           </div>
         )}
 
-        {enabled && (galaxy || !rooms) && planets.length === 0 && (
+        {/* Before migration 003 there are no rooms: everyone online is listed, so "Play alone" hides them here */}
+        {enabled && !rooms && (
+          <div className="mb-3 flex items-center justify-between rounded-lg bg-white/5 p-3 text-xs">
+            <span className="text-white/60">{aloneLocal ? "🧘 Playing alone: trading and invading are off." : "Every god online is here."}</span>
+            <button onClick={() => setAloneLocal((v) => !v)} className={aloneLocal ? "text-indigo-200 hover:text-white" : "text-rose-300 hover:text-rose-200"}>
+              {aloneLocal ? "Meet other gods" : "Play alone"}
+            </button>
+          </div>
+        )}
+
+        {enabled && !alone && planets.length === 0 && (
           <p className="text-sm text-white/50">You&apos;re the only god here{galaxy ? `. Share the code ${galaxy} (or the link) so others can join` : ""}.</p>
         )}
-        {enabled && !spacefaring && planets.length > 0 && <p className="mb-2 text-xs text-white/45">🔒 Trading and invading unlock when your people reach the Space Age.</p>}
-        {enabled && planets.length > 0 && (
+        {enabled && !spacefaring && shown.length > 0 && <p className="mb-2 text-xs text-white/45">🔒 Trading and invading unlock when your people reach the Space Age.</p>}
+        {enabled && shown.length > 0 && (
           <>
             <div className="mb-3 flex gap-2">
               {/* Buttons, not a native <select>: the HUD re-renders a few times a second as stocks change, which made an open dropdown flicker and close. */}
@@ -337,7 +388,7 @@ export default function Galaxy({
               <input type="number" min={1} max={10000} value={amount} onChange={(e) => setAmount(Math.max(1, Math.floor(Number(e.target.value)) || 1))} className="w-20 self-start rounded-lg bg-white/10 px-3 py-2 text-sm" />
             </div>
             <div className="space-y-2">
-              {planets.map((p) => (
+              {shown.map((p) => (
                 <article key={p.world_id} className="rounded-lg bg-white/5 p-3">
                   <div className="flex justify-between gap-2">
                     <div>

@@ -18,7 +18,14 @@ export const CODE_RULE = "Codes are 3 to 12 letters or numbers.";
 
 export function wantedGalaxy() {
   try {
-    const fromUrl = cleanCode(new URLSearchParams(window.location.search).get("galaxy"));
+    // A shared link's code is taken once, then dropped from the address bar, so leaving
+    // (or playing alone) isn't undone by the next refresh.
+    const url = new URL(window.location.href);
+    const fromUrl = cleanCode(url.searchParams.get("galaxy"));
+    if (url.searchParams.has("galaxy")) {
+      url.searchParams.delete("galaxy");
+      window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
+    }
     if (fromUrl) localStorage.setItem(KEY, fromUrl);
     return cleanCode(localStorage.getItem(KEY));
   } catch {
