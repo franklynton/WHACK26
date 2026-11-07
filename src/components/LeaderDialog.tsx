@@ -4,6 +4,7 @@
 // decisions feed back into the sim (their focus, or how they treat a neighbour).
 import { useEffect, useRef, useState } from "react";
 import Portrait, { type Mood } from "./Portrait";
+import RaceStats from "./RaceStats";
 import { ERAS, RACE, eraProgress } from "@/sim/races";
 import type { Civ, LeaderMessage, NationInfo } from "@/types/world";
 
@@ -68,13 +69,8 @@ export default function LeaderDialog({
               <div className="h-full rounded-full bg-amber-300" style={{ width: `${Math.round(eraProgress(nation.tech) * 100)}%` }} />
             </div>
           </div>
-          <div className="w-full space-y-1 text-left text-xs">
-            {race.pros.map((p) => (
-              <p key={p} className="text-emerald-300">+ {p}</p>
-            ))}
-            {race.cons.map((c) => (
-              <p key={c} className="text-rose-300">− {c}</p>
-            ))}
+          <div className="w-full text-left">
+            <RaceStats race={nation.race} compact />
           </div>
         </div>
 

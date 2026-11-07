@@ -2,6 +2,7 @@
 // The front page: what Arda is, how to play, and a button to create your planet.
 import { useState } from "react";
 import Portrait from "./Portrait";
+import RaceStats from "./RaceStats";
 import { RACES, type RaceId } from "@/sim/races";
 import { PLANET_TYPES } from "@/sim/planet";
 
@@ -92,10 +93,7 @@ export default function Landing({ onStart }: { onStart: (playerName: string, pla
           {RACES.filter((r) => r.id === race).map((r) => (
             <div key={r.id} className="rounded-lg bg-white/5 p-3 text-xs">
               <p className="mb-1.5 text-sm text-white/80">{r.blurb}</p>
-              <div className="grid grid-cols-2 gap-x-3">
-                <div>{r.pros.map((p) => <p key={p} className="text-emerald-300">+ {p}</p>)}</div>
-                <div>{r.cons.map((c) => <p key={c} className="text-rose-300">− {c}</p>)}</div>
-              </div>
+              <RaceStats race={r.id} />
               <p className="mt-1.5 text-white/45">Thrives on {r.home} worlds. The other nations on your planet will be other races.</p>
             </div>
           ))}
