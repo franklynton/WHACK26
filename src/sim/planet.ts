@@ -1677,10 +1677,9 @@ export class PlanetSim {
     this.produced += amount * VALUE[r];
   }
 
-  // Military strength (for invading other planets later): trained soldiers plus their weapons.
+  // Military strength (for invading other planets later): a fifth of the population can fight.
   military() {
-    const adults = this.people.filter((p) => p.age > 16 && p.age < 50).length;
-    return Math.round(adults / 4 + Math.min(30, this.resources.metal / 20));
+    return Math.round(this.people.length * 0.2); // one in five people can fight
   }
 
   stats(): PlanetStats {
