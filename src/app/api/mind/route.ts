@@ -18,5 +18,5 @@ export async function POST(req: Request) {
   const ai = allowAi(visitorId(req));
   const t = (ai ? await askJson(p.system, p.user, isThought, 500) : null) ?? fallbackThought(world, chat);
   const civ: Civ = { ...world.civ, attitude: t.attitude, laws: t.newLaw ? [...world.civ.laws, t.newLaw].slice(-8) : world.civ.laws };
-  return NextResponse.json({ civ, reply: t.reply, policy: t.policy, reason: t.reason });
+  return NextResponse.json({ civ, reply: t.reply, policy: t.policy, reason: t.reason, toward: t.toward ?? null });
 }

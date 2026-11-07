@@ -1,12 +1,13 @@
 "use client";
-// The game screen: the globe in the middle, the planet's vital signs on the left,
-// the god powers along the bottom, and the people's shared mind on the right.
-// This file wires the sim (src/sim/planet.ts) to the LLM routes (/api/narrate, /api/mind).
+// The game screen: the globe in the middle, the planet and its nations on the left,
+// the god powers along the bottom, and the chosen nation's mind on the right.
+// Each nation has its own AI mind, religion and chat. This file wires the sim
+// (src/sim/planet.ts) to the LLM routes (/api/narrate, /api/mind).
 import { useCallback, useEffect, useRef, useState } from "react";
 import Globe, { type Tool } from "./Globe";
 import { PlanetSim, type SimEvent } from "@/sim/planet";
-import { FALLBACK_CIV, fallbackReaction, fallbackThought } from "@/lib/narrator";
-import type { ChronicleEntry, ChronicleKind, Civ, Crisis, GodPower, MindMessage, Needs, PlanetStats, Policy, World } from "@/types/world";
+import { fallbackCiv, fallbackReaction, fallbackThought } from "@/lib/narrator";
+import type { ChronicleEntry, ChronicleKind, Civ, Crisis, GodPower, MindMessage, NationInfo, Needs, PlanetStats, Policy, Relation, World } from "@/types/world";
 
 const TOOLS: { tool: Tool; label: string; icon: string }[] = [
   { tool: "hand", label: "Rotate", icon: "✋" },
@@ -17,6 +18,8 @@ const TOOLS: { tool: Tool; label: string; icon: string }[] = [
   { tool: "rain", label: "Rain", icon: "🌧️" },
   { tool: "drought", label: "Drought", icon: "☀️" },
   { tool: "miracle", label: "Miracle", icon: "✨" },
+  { tool: "peace", label: "Peace", icon: "🕊️" },
+  { tool: "discord", label: "Discord", icon: "😈" },
   { tool: "fire", label: "Fire", icon: "🔥" },
   { tool: "meteor", label: "Meteor", icon: "☄️" },
 ];
@@ -39,76 +42,129 @@ const POLICY_LABEL: Record<Policy, string> = {
   hoard: "Hoarding",
   rebel: "Rebelling",
 };
-const THINK_EVERY_MS = 35_000; // the mind speaks up on its own this often
-const START_PEOPLE = 14;
+const RELATION_STYLE: Record<Relation, { icon: string; cls: string; label: string }> = {
+  peace: { icon: "·", cls: "text-white/40", label: "at peace" },
+  trade: { icon: "🤝", cls: "text-emerald-300", label: "trading" },
+  rival: { icon: "😠", cls: "text-amber-300", label: "rivals" },
+  war: { icon: "⚔️", cls: "text-rose-300", label: "at war" },
+};
+const THINK_EVERY_MS = 45_000; // each nation's mind speaks up on its own this often
+const THINK_GAP_MS = 10_000; // but minds take turns, at most one every 10 seconds
+
+type Entry = ChronicleEntry & { nation?: number };
+type Item = SimEvent & { nation: number }; // a queued event, pinned to the nation that tells it
 
 interface Hud {
   year: number;
   stats: PlanetStats;
   needs: Needs;
-  crisis: Crisis | null;
-  policy: Policy;
+  nations: NationInfo[];
 }
 
 export default function Game({ playerName }: { playerName: string }) {
   const [sim] = useState(() => {
     const s = new PlanetSim();
-    const start = s.bestStart();
-    for (let i = 0; i < START_PEOPLE; i++) s.spawnNear(start);
+    s.seedNations(); // 2 to 5 nations, far apart
     return s;
   });
+  const count = sim.nations.length;
   const [tool, setTool] = useState<Tool>("rain");
   const [brush, setBrush] = useState(1);
   const [speed, setSpeed] = useState(1);
   const [hud, setHud] = useState<Hud>(() => readHud(sim));
-  const [civ, setCiv] = useState<Civ | null>(null);
-  const [chronicle, setChronicle] = useState<ChronicleEntry[]>([]);
-  const [chat, setChat] = useState<MindMessage[]>([]);
-  const [reason, setReason] = useState("");
+  const [civs, setCivs] = useState<(Civ | null)[]>(() => new Array(count).fill(null));
+  const [chats, setChats] = useState<MindMessage[][]>(() => Array.from({ length: count }, () => []));
+  const [reasons, setReasons] = useState<string[]>(() => new Array(count).fill(""));
+  const [chronicle, setChronicle] = useState<Entry[]>([]);
+  const [sel, setSel] = useState(0); // the nation the god is looking at and talking to
   const [busy, setBusy] = useState<"" | "narrating" | "thinking">("");
   const [draft, setDraft] = useState("");
 
   // Refs so timers always see the latest state without re-subscribing.
-  const civRef = useRef(civ);
-  civRef.current = civ;
+  const civsRef = useRef(civs);
+  civsRef.current = civs;
+  const chatsRef = useRef(chats);
+  chatsRef.current = chats;
   const chronicleRef = useRef(chronicle);
   chronicleRef.current = chronicle;
-  const chatRef = useRef(chat);
-  chatRef.current = chat;
-  const queue = useRef<SimEvent[]>([]); // events waiting to be narrated
+  const queue = useRef<Item[]>([]); // events waiting to be narrated
+  const genesisDue = useRef<number[]>([]); // nations that just founded their first village
   const inFlight = useRef(false);
-  const lastThought = useRef(Date.now());
-  const answerDue = useRef(false); // the god spoke and the mind hasn't answered yet
-  const stroke = useRef<GodPower | null>(null);
-  const lastTold = useRef<Record<string, number>>({}); // year each kind of event was last narrated
+  const lastThought = useRef<number[]>(new Array(count).fill(Date.now()));
+  const lastAnyThought = useRef(Date.now());
+  const answerDue = useRef<number | null>(null); // the god spoke to this nation and it hasn't answered yet
+  const stroke = useRef<{ power: GodPower; face: number } | null>(null);
+  const lastTold = useRef<Record<string, number>>({}); // year each kind of event was last narrated, per nation
 
-  const world = useCallback(
-    (): World => ({ id: "local", ...readHud(sim), civ: civRef.current, chronicle: chronicleRef.current }),
+  const setCiv = (id: number, civ: Civ) => {
+    const next = [...civsRef.current];
+    next[id] = civ;
+    civsRef.current = next;
+    setCivs(next);
+    sim.nations[id].name = civ.name; // sim events now use the name the mind chose
+  };
+  const addChat = (id: number, m: MindMessage) => {
+    const next = chatsRef.current.map((c, i) => (i === id ? [...c, m].slice(-30) : c));
+    chatsRef.current = next;
+    setChats(next);
+  };
+  const addEntry = (e: Entry) => setChronicle((c) => [...c, e].slice(-60));
+
+  // What one nation's mind sees: the whole planet, plus its own needs, focus and neighbours.
+  const worldFor = useCallback(
+    (id: number): World => {
+      const info = sim.nationInfo()[id];
+      return {
+        id: "local",
+        year: sim.year,
+        stats: sim.stats(),
+        needs: info.needs,
+        crisis: info.crisis,
+        policy: info.policy,
+        civ: civsRef.current[id],
+        chronicle: chronicleRef.current,
+        nation: {
+          id,
+          name: sim.nationName(id),
+          population: info.population,
+          villages: info.villages,
+          relations: info.relations.map((r) => ({ name: sim.nationName(r.id), relation: r.relation, tension: r.tension })),
+        },
+      };
+    },
     [sim],
   );
-  const addEntry = (e: ChronicleEntry) => setChronicle((c) => [...c, e].slice(-50));
 
-  // One LLM call at a time: narrate the next queued event, or let the mind think.
+  // One LLM call at a time. Order: answer the god, wake up new nations, tell the news,
+  // then let the nation that has been quiet longest think out loud.
   const pump = useCallback(async () => {
     if (inFlight.current) return;
-    const w = world();
-    // Answering the god comes first, then news, then thinking out loud.
-    const answer = answerDue.current && civRef.current;
-    const next = answer ? undefined : queue.current.shift();
-    const timeToThink = civRef.current && Date.now() - lastThought.current > THINK_EVERY_MS;
-    if (!answer && !next && !timeToThink) return;
-    answerDue.current = false;
+    const answer = answerDue.current;
+    const genesis = answer == null ? genesisDue.current.shift() : undefined;
+    const next = answer == null && genesis == null ? queue.current.shift() : undefined;
+    let thinker: number | null = answer;
+    if (thinker == null && genesis == null && !next && Date.now() - lastAnyThought.current > THINK_GAP_MS) {
+      const ready = sim.nations.filter((n) => n.alive && civsRef.current[n.id] && Date.now() - lastThought.current[n.id] > THINK_EVERY_MS);
+      ready.sort((a, b) => lastThought.current[a.id] - lastThought.current[b.id]);
+      thinker = ready[0]?.id ?? null;
+    }
+    if (genesis == null && !next && thinker == null) return;
+    answerDue.current = null;
     inFlight.current = true;
     try {
-      if (next) {
+      if (genesis != null) {
         setBusy("narrating");
-        // The people become self-aware when they found their first village.
-        const kind: ChronicleKind = civRef.current ? next.kind : "genesis";
-        const res = await post<{ civ: Civ; entry: ChronicleEntry }>("/api/narrate", { world: w, kind, detail: next.detail });
-        setCiv(res.civ);
-        addEntry(res.entry);
-      } else {
-        await think(w);
+        const res = await post<{ civ: Civ; entry: ChronicleEntry }>("/api/narrate", { world: worldFor(genesis), kind: "genesis" });
+        setCiv(genesis, res.civ);
+        addEntry({ ...res.entry, nation: genesis });
+        lastThought.current[genesis] = Date.now() - THINK_EVERY_MS + 15_000; // first words soon after waking
+      } else if (next) {
+        setBusy("narrating");
+        const res = await post<{ civ: Civ; entry: ChronicleEntry }>("/api/narrate", { world: worldFor(next.nation), kind: next.kind, detail: next.detail });
+        setCiv(next.nation, res.civ);
+        addEntry({ ...res.entry, nation: next.nation });
+      } else if (thinker != null) {
+        await think(thinker);
       }
     } catch (err) {
       console.error(err);
@@ -116,86 +172,109 @@ export default function Game({ playerName }: { playerName: string }) {
       inFlight.current = false;
       setBusy("");
     }
-  }, [world]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [worldFor]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const think = async (w: World) => {
+  const think = async (id: number) => {
     setBusy("thinking");
-    lastThought.current = Date.now();
-    const res = await post<{ civ: Civ; reply: string; policy: Policy; reason: string }>("/api/mind", { world: w, chat: chatRef.current });
-    setCiv(res.civ);
-    setChat((c) => [...c, { from: "mind" as const, text: res.reply }].slice(-30));
-    if (res.policy !== sim.policy) addEntry({ year: w.year, kind: "mind", text: `The people turn to ${POLICY_LABEL[res.policy].toLowerCase()}: ${res.reason}` });
-    sim.policy = res.policy;
-    setReason(res.reason);
+    lastThought.current[id] = lastAnyThought.current = Date.now();
+    const w = worldFor(id);
+    const res = await post<{ civ: Civ; reply: string; policy: Policy; reason: string; toward: { nation: string; stance: string } | null }>("/api/mind", {
+      world: w,
+      chat: chatsRef.current[id],
+    });
+    setCiv(id, res.civ);
+    addChat(id, { from: "mind", text: res.reply });
+    const nt = sim.nations[id];
+    if (res.policy !== nt.policy) addEntry({ year: w.year, kind: "mind", nation: id, text: `${res.civ.name} turn to ${POLICY_LABEL[res.policy].toLowerCase()}: ${res.reason}` });
+    nt.policy = res.policy;
+    setReasons((r) => r.map((x, i) => (i === id ? res.reason : x)));
+    // The mind's stance towards a neighbour nudges the tension between them.
+    const other = res.toward && sim.nations.find((o) => o.id !== id && o.alive && o.name.toLowerCase() === res.toward!.nation.toLowerCase());
+    if (other) sim.sway(id, other.id, res.toward!.stance === "hostile" ? 6 : -6);
   };
 
   // Poll the sim for the HUD, collect its events, and keep the LLM pump going.
   useEffect(() => {
-    let lastCrisis: Crisis | null = null;
+    const lastCrisis: (Crisis | null)[] = new Array(count).fill(null);
     const id = setInterval(() => {
-      setHud(readHud(sim));
+      const h = readHud(sim);
+      setHud(h);
       for (const e of sim.events.splice(0)) {
-        // Don't narrate the same kind of thing twice in quick succession.
-        if (e.kind !== "milestone" && sim.year - (lastTold.current[e.kind] ?? -99) < 25) continue;
-        lastTold.current[e.kind] = sim.year;
-        // Before genesis only the first village matters; after it, skip routine village news.
-        if (!civRef.current ? e.kind === "village" : e.kind !== "village" || sim.villages.length <= 3) queue.current.push(e);
+        const awake = sim.nations.filter((n) => civsRef.current[n.id]).map((n) => n.id);
+        const nation = e.nation ?? awake[Math.floor(Math.random() * awake.length)];
+        if (nation == null) continue;
+        if (!civsRef.current[nation]) {
+          // A nation becomes self-aware when it founds its first village.
+          if (e.kind === "village" && !genesisDue.current.includes(nation)) genesisDue.current.push(nation);
+          continue;
+        }
+        // Don't narrate the same kind of thing for the same nation twice in quick succession.
+        const big = e.kind === "diplomacy" || e.kind === "captured" || e.kind === "fallen";
+        const key = big ? `${e.kind}:${Math.min(nation, e.other ?? nation)}-${Math.max(nation, e.other ?? nation)}` : `${e.kind}:${nation}`;
+        if (e.kind !== "milestone" && sim.year - (lastTold.current[key] ?? -99) < (big ? 8 : 25)) continue;
+        lastTold.current[key] = sim.year;
+        if (e.kind === "village" && h.nations[nation].villages > 3) continue; // routine growth
+        queue.current.push({ ...e, nation });
       }
-      const crisis = sim.crisis();
-      if (crisis && crisis !== lastCrisis && civRef.current) queue.current.push({ kind: crisis, detail: `A ${crisis} has begun.` });
-      lastCrisis = crisis;
-      queue.current = queue.current.slice(-3); // stay current: drop old news if the LLM falls behind
+      for (const n of h.nations) {
+        if (n.crisis && n.crisis !== lastCrisis[n.id] && civsRef.current[n.id]) queue.current.push({ kind: n.crisis, detail: `A ${n.crisis} has begun in ${n.name}.`, nation: n.id });
+        lastCrisis[n.id] = n.crisis;
+      }
+      queue.current = queue.current.slice(-4); // stay current: drop old news if the LLM falls behind
       pump();
     }, 300);
     return () => clearInterval(id);
-  }, [sim, pump]);
+  }, [sim, pump, count]);
 
-  // A stroke of a power is narrated once, when the mouse is released.
+  // A stroke of a power is narrated once, when the mouse is released, by the nation it touched.
   useEffect(() => {
     const up = () => {
-      const p = stroke.current;
+      const s = stroke.current;
       stroke.current = null;
-      if (p && civRef.current && p !== "spawn") queue.current.push({ kind: p, detail: `The god used ${p} on the planet.` });
+      if (!s || s.power === "spawn") return;
+      const nation = sim.owner[s.face] >= 0 ? sim.owner[s.face] : sim.nearestNation(s.face);
+      if (civsRef.current[nation]) queue.current.push({ kind: s.power, detail: `The god used ${s.power} near ${sim.nationName(nation)}.`, nation });
     };
     window.addEventListener("pointerup", up);
     return () => window.removeEventListener("pointerup", up);
-  }, []);
+  }, [sim]);
 
   const paint = (power: GodPower, face: number) => {
     sim.apply(power, face, BRUSHES[brush].radius);
-    if (power !== "meteor") stroke.current = power; // meteors report themselves
+    if (power !== "meteor") stroke.current = { power, face }; // meteors report themselves
   };
 
-  // The god's words go into the chat straight away; the mind answers as soon as it is free.
+  // The god's words go into the chosen nation's chat; its mind answers as soon as it is free.
   const speak = (e: React.FormEvent) => {
     e.preventDefault();
     const text = draft.trim();
-    if (!text || !civ) return;
+    if (!text || !civs[sel]) return;
     setDraft("");
-    const next = [...chatRef.current, { from: "god" as const, text }];
-    chatRef.current = next;
-    setChat(next);
-    answerDue.current = true;
+    addChat(sel, { from: "god", text });
+    sim.nations[sel].faith = Math.min(100, sim.nations[sel].faith + 6); // being spoken to by their god renews their faith
+    answerDue.current = sel;
     pump();
   };
 
-  const { stats, needs } = hud;
+  const { stats } = hud;
+  const civ = civs[sel];
+  const me = hud.nations[sel];
+  const chat = chats[sel];
+  const awake = civs.filter(Boolean).length;
   return (
     <main className="relative h-dvh w-full overflow-hidden select-none">
       <div className="absolute inset-0">
         <Globe sim={sim} tool={tool} speed={speed} onPaint={paint} />
       </div>
 
-      {/* Vital signs */}
-      <aside className="glass absolute left-4 top-4 w-64 space-y-4 p-4">
+      {/* The planet and its nations */}
+      <aside className="glass absolute bottom-4 left-4 top-4 flex w-64 flex-col gap-4 overflow-y-auto p-4">
         <div>
           <p className="label">
             Year {Math.floor(hud.year)} · God: {playerName}
           </p>
-          <p className="text-2xl font-semibold">{civ?.name ?? "An unnamed world"}</p>
-          <p className="text-xs text-white/45" title={sim.type.blurb}>
-            {sim.type.name} · {sim.type.blurb}
-          </p>
+          <p className="text-2xl font-semibold">{sim.type.name}</p>
+          <p className="text-xs text-white/45">{sim.type.blurb}</p>
           <p className="text-sm text-white/60">
             {stats.population.toLocaleString()} people · {stats.villages} {stats.villages === 1 ? "village" : "villages"}
           </p>
@@ -208,19 +287,40 @@ export default function Game({ playerName }: { playerName: string }) {
           <Stock icon="🪙" label="Gold" value={stats.resources.gold} />
           <Stock icon="🌿" label="Herbs (medicine)" value={stats.resources.herbs} />
         </div>
-        <NeedBars needs={needs} crisis={hud.crisis} />
-        {civ && (
-          <div className="text-sm">
-            <p className="label">Focus</p>
-            <p className={hud.policy === "rebel" ? "font-semibold text-rose-300" : "font-semibold"}>{POLICY_LABEL[hud.policy]}</p>
-            {reason && <p className="text-xs text-white/50">{reason}</p>}
-          </div>
-        )}
-        <div className="flex justify-between">
+        <div>
+          <p className="label mb-1.5">Nations ({hud.nations.filter((n) => n.alive).length})</p>
+          <ul className="space-y-1">
+            {hud.nations.map((n) => (
+              <li key={n.id}>
+                <button
+                  onClick={() => setSel(n.id)}
+                  className={`w-full rounded-lg px-2 py-1.5 text-left text-sm transition ${sel === n.id ? "bg-white/15" : "hover:bg-white/5"} ${n.alive ? "" : "opacity-40"}`}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: n.color }} />
+                    <span className="flex-1 truncate font-medium">{cap(n.name)}</span>
+                    <span className="text-xs tabular-nums text-white/50">{n.alive ? n.population : "fallen"}</span>
+                  </div>
+                  <div className="ml-4.5 flex flex-wrap gap-x-2 text-xs">
+                    {n.crisis && <span className="font-semibold uppercase text-rose-300">{n.crisis}</span>}
+                    {n.relations
+                      .filter((r) => r.relation !== "peace")
+                      .map((r) => (
+                        <span key={r.id} className={RELATION_STYLE[r.relation].cls} title={`${RELATION_STYLE[r.relation].label}, tension ${r.tension}`}>
+                          {RELATION_STYLE[r.relation].icon} {cap(hud.nations[r.id].name)}
+                        </span>
+                      ))}
+                  </div>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="mt-auto flex justify-between">
           <Segmented options={BRUSHES.map((b) => b.label)} value={brush} onChange={setBrush} title="Brush" />
           <Segmented options={SPEEDS.map((s) => s.label)} value={SPEEDS.findIndex((s) => s.speed === speed)} onChange={(i) => setSpeed(SPEEDS[i].speed)} title="Speed" />
         </div>
-        {!civ && <p className="text-xs text-white/55">Your people are wandering. Keep them fed and they will found a village, then become aware of you.</p>}
+        {!awake && <p className="text-xs text-white/55">Your nations are wandering. Keep them fed and each will found a village, then become aware of you. Keep them from fighting.</p>}
       </aside>
 
       {/* God powers: centred in the space between the two side panels */}
@@ -236,26 +336,37 @@ export default function Game({ playerName }: { playerName: string }) {
         </div>
       </div>
 
-      {/* The people's shared mind */}
+      {/* The chosen nation's mind */}
       <aside className="glass absolute bottom-4 right-4 top-4 flex w-72 flex-col p-4">
-        {civ ? (
-          <div className="mb-3 space-y-1 border-b border-white/10 pb-3 text-sm">
-            <p>
-              <span className="label">Faith</span> {civ.religion.name}
-            </p>
-            <p className="text-white/70">
-              They call you <b>{civ.religion.godName}</b>. {civ.religion.belief}
-            </p>
-            <p>
-              <span className="label">They feel</span> <span className={civ.attitude === "hostile" || civ.attitude === "resentful" ? "text-rose-300" : ""}>{civ.attitude}</span>
-            </p>
+        <div className="mb-3 space-y-2 border-b border-white/10 pb-3 text-sm">
+          <div className="flex items-center gap-2">
+            <span className="h-3 w-3 rounded-full" style={{ background: me.color }} />
+            <p className="text-lg font-semibold">{cap(me.name)}</p>
           </div>
-        ) : (
-          <p className="mb-3 border-b border-white/10 pb-3 text-sm text-white/50">They do not know you yet.</p>
-        )}
+          <NeedBars needs={me.needs} crisis={me.crisis} />
+          {civ ? (
+            <>
+              <p>
+                <span className="label">Focus</span> <span className={me.policy === "rebel" ? "font-semibold text-rose-300" : "font-semibold"}>{POLICY_LABEL[me.policy]}</span>
+                {reasons[sel] && <span className="block text-xs text-white/50">{reasons[sel]}</span>}
+              </p>
+              <p>
+                <span className="label">Faith</span> {civ.religion.name}
+              </p>
+              <p className="text-white/70">
+                They call you <b>{civ.religion.godName}</b>. {civ.religion.belief}
+              </p>
+              <p>
+                <span className="label">They feel</span> <span className={civ.attitude === "hostile" || civ.attitude === "resentful" ? "text-rose-300" : ""}>{civ.attitude}</span>
+              </p>
+            </>
+          ) : (
+            <p className="text-white/50">{me.alive ? "They do not know you yet." : "This nation is gone."}</p>
+          )}
+        </div>
 
-        <p className="label mb-2">Voice of the people {busy === "thinking" && <span className="animate-pulse">· thinking…</span>}</p>
-        <ol className="mb-2 max-h-[38%] space-y-2 overflow-y-auto text-sm">
+        <p className="label mb-2">Voice of {civ ? civ.demonym : "the people"} {busy === "thinking" && <span className="animate-pulse">· thinking…</span>}</p>
+        <ol className="mb-2 max-h-[28%] space-y-2 overflow-y-auto text-sm">
           {chat.map((m, i) => (
             <li key={i} className={m.from === "god" ? "text-right text-sky-200" : "italic text-amber-100"}>
               {m.text}
@@ -267,7 +378,7 @@ export default function Game({ playerName }: { playerName: string }) {
           <input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            disabled={!civ}
+            disabled={!civ || !me.alive}
             placeholder={civ ? `Speak to ${civ.demonym}…` : "No one to hear you yet"}
             className="min-w-0 flex-1 rounded-lg bg-white/10 px-3 py-1.5 text-sm outline-none placeholder:text-white/30 focus:bg-white/15"
           />
@@ -280,6 +391,7 @@ export default function Game({ playerName }: { playerName: string }) {
         <ol className="flex-1 space-y-3 overflow-y-auto text-sm">
           {[...chronicle].reverse().map((c, i) => (
             <li key={chronicle.length - i}>
+              {c.nation != null && <span className="mr-1.5 inline-block h-2 w-2 rounded-full" style={{ background: sim.nations[c.nation].color }} />}
               <span className="text-white/40">Year {Math.floor(c.year)} · </span>
               {c.text}
             </li>
@@ -290,8 +402,10 @@ export default function Game({ playerName }: { playerName: string }) {
   );
 }
 
+const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
+
 function readHud(sim: PlanetSim): Hud {
-  return { year: sim.year, stats: sim.stats(), needs: sim.needs(), crisis: sim.crisis(), policy: sim.policy };
+  return { year: sim.year, stats: sim.stats(), needs: sim.needs(), nations: sim.nationInfo() };
 }
 
 // Calls an LLM route. If the server can't be reached (for example the static demo build,
@@ -309,11 +423,11 @@ async function post<T>(url: string, body: unknown): Promise<T> {
 function offline(url: string, { world, kind, chat = [] }: { world: World; kind?: ChronicleKind; chat?: MindMessage[] }) {
   if (url === "/api/mind") {
     const t = fallbackThought(world, chat);
-    return { civ: { ...world.civ, attitude: t.attitude }, reply: t.reply, policy: t.policy, reason: t.reason };
+    return { civ: { ...world.civ, attitude: t.attitude }, reply: t.reply, policy: t.policy, reason: t.reason, toward: t.toward ?? null };
   }
   if (kind === "genesis" || !world.civ) {
-    const c = FALLBACK_CIV;
-    return { civ: c, entry: { year: world.year, kind: "genesis", text: `${c.demonym[0].toUpperCase()}${c.demonym.slice(1)} light their first fires and name their world ${c.name}.` } };
+    const c = fallbackCiv(world.nation?.id);
+    return { civ: c, entry: { year: world.year, kind: "genesis", text: `${cap(c.demonym)} light their first fires and call themselves ${c.name}.` } };
   }
   const r = fallbackReaction(world, kind ?? "milestone");
   return { civ: { ...world.civ, attitude: r.attitude }, entry: { year: world.year, kind, text: r.text } };
@@ -335,7 +449,7 @@ function NeedBars({ needs, crisis }: { needs: Needs; crisis: Crisis | null }) {
     ["Stability", needs.stability],
   ];
   return (
-    <div className="space-y-2">
+    <div className="space-y-1.5">
       {bars.map(([name, v]) => (
         <div key={name}>
           <div className="flex justify-between text-xs text-white/70">
@@ -343,7 +457,7 @@ function NeedBars({ needs, crisis }: { needs: Needs; crisis: Crisis | null }) {
             <span className="tabular-nums">{Math.round(v)}</span>
           </div>
           <div className="h-1.5 rounded-full bg-white/10">
-            <div className={`h-full rounded-full transition-all ${v < 25 ? "bg-rose-400" : "bg-sky-300"}`} style={{ width: `${v}%` }} />
+            <div className={`h-full rounded-full transition-all ${v < 25 ? "bg-rose-400" : "bg-sky-300"}`} style={{ width: `${Math.max(0, Math.min(100, v))}%` }} />
           </div>
         </div>
       ))}

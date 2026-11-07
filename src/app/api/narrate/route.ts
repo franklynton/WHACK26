@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { ChronicleEntry, ChronicleKind, Civ, World } from "@/types/world";
 import { askJson } from "@/lib/openrouter";
-import { FALLBACK_CIV, fallbackReaction, genesisPrompt, isGenesis, isReaction, reactPrompt } from "@/lib/narrator";
+import { fallbackCiv, fallbackReaction, genesisPrompt, isGenesis, isReaction, reactPrompt } from "@/lib/narrator";
 import { allowAi, visitorId } from "@/lib/rateLimit";
 
 interface Body {
@@ -18,7 +18,8 @@ export async function POST(req: Request) {
   if (kind === "genesis" || !world.civ) {
     const p = genesisPrompt(world);
     const g = ai ? await askJson(p.system, p.user, isGenesis, 700) : null;
-    const civ: Civ = g ? { ...FALLBACK_CIV, ...g.civ, attitude: "worship" } : FALLBACK_CIV;
+    const base = fallbackCiv(world.nation?.id);
+    const civ: Civ = g ? { ...base, ...g.civ, attitude: "worship" } : base;
     const entry: ChronicleEntry = { year: world.year, kind: "genesis", text: g?.text ?? `${civ.demonym[0].toUpperCase()}${civ.demonym.slice(1)} light their first fires and name their world ${civ.name}.` };
     return NextResponse.json({ civ, entry });
   }

@@ -12,7 +12,7 @@ async function askOnce(system: string, messages: Turn[], maxTokens: number): Pro
       headers: {
         "content-type": "application/json",
         authorization: `Bearer ${key}`,
-        "X-Title": "Petri",
+        "X-Title": "Arda",
       },
       body: JSON.stringify({
         model: process.env.OPENROUTER_MODEL || DEFAULT_MODEL,

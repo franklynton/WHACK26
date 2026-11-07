@@ -5,7 +5,7 @@ const dir = ".next/static/css";
 const css = readdirSync(dir).map((f) => readFileSync(`${dir}/${f}`, "utf8")).join("\n");
 writeFileSync(
   "demo/index.html",
-  `<title>Petri</title>
+  `<title>Arda</title>
 <style>
 ${css}
 :root{color-scheme:dark;background:#04050c}html,body{background:#04050c;color:#f1f5f9}#root{min-height:100%}

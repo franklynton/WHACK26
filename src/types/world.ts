@@ -5,7 +5,7 @@
 // This file holds the summaries that the UI, the API routes and the LLM share.
 
 // God powers the player can use. Brush powers paint an area; spawn and meteor act on a click.
-export type GodPower = "raise" | "lower" | "forest" | "rain" | "drought" | "fire" | "meteor" | "spawn" | "miracle";
+export type GodPower = "raise" | "lower" | "forest" | "rain" | "drought" | "fire" | "meteor" | "spawn" | "miracle" | "peace" | "discord";
 
 // What the people's shared mind (the LLM) is focused on. The sim changes agent behaviour
 // for each one: expand founds more villages, farm grows more food, worship keeps faith up,
@@ -62,7 +62,7 @@ export type Attitude = "worship" | "fear" | "indifferent" | "resentful" | "hosti
 // Collapse states that the simulation triggers when needs fall too low.
 export type Crisis = "famine" | "revolution" | "cult";
 
-export type ChronicleKind = GodPower | Crisis | "genesis" | "village" | "milestone" | "extinct" | "disaster" | "mind" | "contact";
+export type ChronicleKind = GodPower | Crisis | "genesis" | "village" | "milestone" | "extinct" | "disaster" | "mind" | "contact" | "diplomacy" | "captured" | "fallen";
 
 // One line of the running history shown to the player.
 export interface ChronicleEntry {
@@ -77,6 +77,24 @@ export interface MindMessage {
   text: string;
 }
 
+// How two nations on the same planet feel about each other. Tension (0-100) moves
+// them along peace -> trade (low tension) or rival -> war (high tension).
+export type Relation = "peace" | "trade" | "rival" | "war";
+
+// A read-out of one nation for the HUD and the LLM, built by PlanetSim.nationInfo().
+export interface NationInfo {
+  id: number;
+  name: string;
+  color: string;
+  alive: boolean;
+  policy: Policy;
+  population: number;
+  villages: number;
+  needs: Needs;
+  crisis: Crisis | null;
+  relations: { id: number; name?: string; relation: Relation; tension: number }[];
+}
+
 // The snapshot sent to the LLM. Built from the live sim each time.
 export interface World {
   id: string;
@@ -87,6 +105,7 @@ export interface World {
   policy: Policy;
   civ: Civ | null;
   chronicle: ChronicleEntry[]; // newest last
+  nation?: { id: number; name: string; population: number; villages: number; relations: { name: string; relation: Relation; tension: number }[] }; // the nation whose mind is speaking
 }
 
 // ---- Multiplayer galaxy (Supabase Realtime) ----
