@@ -11,6 +11,7 @@ import Portrait, { type Mood } from "./Portrait";
 import { ERAS, RACE, type RaceId } from "@/sim/races";
 import { CHOICE_LIFE, GOAL_YEAR, MIRACLES, PRAYER_LIFE, PLANET_TYPES, PlanetSim, SECONDS_PER_YEAR, type MiracleId, type SimEvent } from "@/sim/planet";
 import { sound } from "@/lib/sound";
+import { saveGame, type Save } from "@/lib/save";
 import { fallbackCiv, fallbackLeader, fallbackReaction, fallbackThought, type LeaderReply } from "@/lib/narrator";
 import type { ChronicleEntry, ChronicleKind, Civ, Crisis, LeaderMessage, MindMessage, NationInfo, Needs, PlanetStats, Policy, Relation, World } from "@/types/world";
 
@@ -48,8 +49,15 @@ interface Hud {
   god: { devotion: number; ready: PlanetSim["ready"]; prayers: PlanetSim["prayers"]; spacefaring: boolean; choice: PlanetSim["choice"]; outcome: PlanetSim["outcome"]; avgLove: number };
 }
 
-export default function Game({ playerName, planetName = "Arda", race, worldType }: { playerName: string; planetName?: string; race?: RaceId; worldType?: number }) {
+export default function Game({ playerName, planetName = "Arda", race, worldType, resume, onNewPlanet }: { playerName: string; planetName?: string; race?: RaceId; worldType?: number; resume?: Save; onNewPlanet?: () => void }) {
   const [sim] = useState(() => {
+    if (resume) {
+      try {
+        return PlanetSim.fromSave(resume.sim);
+      } catch (err) {
+        console.warn("Saved game could not be loaded; starting a new one", err);
+      }
+    }
     // The planet type comes from the seed (seed % 5), so a chosen world just picks a matching seed.
     const seed = worldType == null ? undefined : Math.floor(Math.random() * 2e5) * PLANET_TYPES.length + worldType;
     const s = new PlanetSim(seed);
@@ -57,6 +65,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
     return s;
   });
   const count = sim.nations.length;
+  const [ui] = useState(() => (resume?.ui && resume.ui.civs.length === sim.nations.length ? resume.ui : null)); // what the HUD had when the game was saved
   const [muted, setMuted] = useState(() => {
     try {
       return localStorage.getItem("arda-muted") === "1";
@@ -96,19 +105,19 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
       setHud(readHud(sim));
     }
   };
-  const [civs, setCivs] = useState<(Civ | null)[]>(() => new Array(count).fill(null));
-  const [chats, setChats] = useState<MindMessage[][]>(() => Array.from({ length: count }, () => []));
-  const [reasons, setReasons] = useState<string[]>(() => new Array(count).fill(""));
-  const [chronicle, setChronicle] = useState<Entry[]>([]);
-  const [sel, setSel] = useState(0); // the nation the god is looking at and talking to
+  const [civs, setCivs] = useState<(Civ | null)[]>(() => ui?.civs ?? new Array(count).fill(null));
+  const [chats, setChats] = useState<MindMessage[][]>(() => ui?.chats ?? Array.from({ length: count }, () => []));
+  const [reasons, setReasons] = useState<string[]>(() => ui?.reasons ?? new Array(count).fill(""));
+  const [chronicle, setChronicle] = useState<Entry[]>(() => ui?.chronicle ?? []);
+  const [sel, setSel] = useState(() => ui?.sel ?? 0); // the nation the god is looking at and talking to
   const [busy, setBusy] = useState<"" | "narrating" | "thinking">("");
   const [draft, setDraft] = useState("");
   const [focus, setFocus] = useState<{ face: number; key: number } | null>(null); // where the camera flies to
   const [hover, setHover] = useState<{ id: number; x: number; y: number } | null>(null); // nation under the mouse
   // Audiences with each nation's leader (separate from the people's shared mind).
   const [talkTo, setTalkTo] = useState<number | null>(null);
-  const [leaderChats, setLeaderChats] = useState<LeaderMessage[][]>(() => Array.from({ length: count }, () => []));
-  const [moods, setMoods] = useState<Mood[]>(() => new Array(count).fill("pleased"));
+  const [leaderChats, setLeaderChats] = useState<LeaderMessage[][]>(() => ui?.leaderChats ?? Array.from({ length: count }, () => []));
+  const [moods, setMoods] = useState<Mood[]>(() => ui?.moods ?? new Array(count).fill("pleased"));
   const [leaderBusy, setLeaderBusy] = useState(false);
   const leaderChatsRef = useRef(leaderChats);
   leaderChatsRef.current = leaderChats;
@@ -121,7 +130,8 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
   const chronicleRef = useRef(chronicle);
   chronicleRef.current = chronicle;
   const queue = useRef<Item[]>([]); // events waiting to be narrated
-  const genesisDue = useRef<number[]>([]); // nations that just founded their first village
+  // Nations that just founded their first village (on a reload, any settled nation whose mind hadn't woken yet).
+  const genesisDue = useRef<number[]>(ui ? sim.nations.filter((n) => n.alive && !ui.civs[n.id] && sim.villages.some((v) => v.nation === n.id)).map((n) => n.id) : []);
   const inFlight = useRef(false);
   const lastThought = useRef<number[]>(new Array(count).fill(Date.now()));
   const lastAnyThought = useRef(Date.now());
@@ -130,6 +140,25 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
   const lastAlert = useRef(sim.alert);
   const leaderSeeds = useRef<number[]>([]);
   const lastTold = useRef<Record<string, number>>({}); // year each kind of event was last narrated, per nation
+
+  // Save the whole game to this browser every few seconds and when the tab is closed or refreshed.
+  const latest = useRef({ reasons, moods, sel });
+  latest.current = { reasons, moods, sel };
+  useEffect(() => {
+    const save = () =>
+      saveGame({
+        meta: { playerName, planetName, race },
+        ui: { civs: civsRef.current, chats: chatsRef.current, leaderChats: leaderChatsRef.current, chronicle: chronicleRef.current, ...latest.current },
+        sim: sim.toSave(),
+        at: Date.now(),
+      });
+    const id = setInterval(save, 5000);
+    window.addEventListener("pagehide", save);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("pagehide", save);
+    };
+  }, [sim, playerName, planetName, race]);
 
   const setCiv = (id: number, civ: Civ) => {
     const next = [...civsRef.current];
@@ -452,6 +481,15 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
           </ul>
         </div>
         <div className="mt-auto flex items-end justify-center gap-2">
+          {onNewPlanet && (
+            <button
+              onClick={() => confirm("Start over on a new planet? This planet will be lost.") && onNewPlanet()}
+              className="rounded-lg bg-white/5 px-2.5 py-1 text-xs text-white/60 transition hover:bg-white/10 hover:text-white"
+              title="Your planet saves automatically in this browser"
+            >
+              New planet
+            </button>
+          )}
           <button
             onClick={() => setGalaxy(true)}
             disabled={!hud.god.spacefaring}

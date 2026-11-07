@@ -195,6 +195,36 @@ export function invasionBonus(attacker: string, defender: string) {
 }
 const VILLAGE_RANGE = 0.2; // radians: how far people roam from home / how close villages can be
 
+// Fields rebuilt from the seed on load, or not worth keeping.
+const UNSAVED = new Set(["seed", "n", "geometry", "centroids", "neighbours", "vertexId", "cornerCount", "type", "events", "_continents"]);
+const TYPED = { Float32Array, Int16Array, Int32Array, Uint8Array } as const;
+
+// JSON can't hold typed arrays, Sets or Maps, so they're tagged; typed arrays go in as base64.
+function pack(v: unknown): unknown {
+  if (ArrayBuffer.isView(v)) {
+    const bytes = new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
+    let bin = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return { $typed: v.constructor.name, b64: btoa(bin) };
+  }
+  if (v instanceof Set) return { $set: [...v] };
+  if (v instanceof Map) return { $map: [...v] };
+  return v;
+}
+function unpack(v: unknown): unknown {
+  if (!v || typeof v !== "object") return v;
+  const o = v as { $typed?: keyof typeof TYPED; b64?: string; $set?: unknown[]; $map?: [unknown, unknown][] };
+  if (o.$typed) {
+    const bin = atob(o.b64!);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TYPED[o.$typed](bytes.buffer);
+  }
+  if (o.$set) return new Set(o.$set);
+  if (o.$map) return new Map(o.$map);
+  return v;
+}
+
 export class PlanetSim {
   readonly n: number; // tile count
   readonly geometry: THREE.BufferGeometry; // non-indexed, 3 vertices per tile
@@ -1009,6 +1039,27 @@ export class PlanetSim {
   }
 
   // The year shown to players and the minds (the sim's own clock runs much faster).
+  // ---- Saving: every field except the fixed mesh is written out, so a refresh picks up where you left off ----
+
+  toSave(): string {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(this)) if (!UNSAVED.has(k)) out[k] = pack(v);
+    return JSON.stringify({ seed: this.seed, fields: out });
+  }
+
+  static fromSave(json: string): PlanetSim {
+    const { seed, fields } = JSON.parse(json) as { seed: number; fields: Record<string, unknown> };
+    const sim = new PlanetSim(seed); // rebuilds the mesh and neighbours, then the saved state goes on top
+    const self = sim as unknown as Record<string, unknown>;
+    for (const [k, v] of Object.entries(fields)) {
+      const value = unpack(v);
+      if (ArrayBuffer.isView(self[k]) && ArrayBuffer.isView(value)) (self[k] as Float32Array).set(value as Float32Array);
+      else self[k] = value;
+    }
+    sim.version++;
+    return sim;
+  }
+
   get calendar() {
     return this.year / SECONDS_PER_YEAR;
   }
