@@ -34,7 +34,7 @@ const LAND_HEIGHT = 0.07; // how far mountains stand out from the sea
 const PAINT_EVERY_MS = 70;
 const ONE_SHOT: Tool[] = ["spawn", "meteor"];
 
-function PlanetMesh({ sim, tool, onPaint }: { sim: PlanetSim; tool: Tool; onPaint: (power: GodPower, face: number) => void }) {
+function PlanetMesh({ sim, tool, onPaint, onHover }: { sim: PlanetSim; tool: Tool; onPaint: (power: GodPower, face: number) => void; onHover?: (face: number | null, x: number, y: number) => void }) {
   const geometry = useMemo(() => {
     const g = sim.geometry.clone();
     g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(g.getAttribute("position").count * 3), 3));
@@ -120,7 +120,11 @@ function PlanetMesh({ sim, tool, onPaint }: { sim: PlanetSim; tool: Tool; onPain
         painting.current = true;
         paint(e, true);
       }}
-      onPointerMove={(e) => painting.current && paint(e, false)}
+      onPointerMove={(e) => {
+        if (painting.current) paint(e, false);
+        onHover?.(e.faceIndex ?? null, e.nativeEvent.clientX, e.nativeEvent.clientY);
+      }}
+      onPointerOut={() => onHover?.(null, 0, 0)}
     >
       <meshStandardMaterial vertexColors flatShading roughness={0.95} />
     </mesh>
@@ -257,7 +261,7 @@ function Clock({ sim, speed }: { sim: PlanetSim; speed: number }) {
   return null;
 }
 
-export default function Globe({ sim, tool, speed, onPaint }: { sim: PlanetSim; tool: Tool; speed: number; onPaint: (power: GodPower, face: number) => void }) {
+export default function Globe({ sim, tool, speed, onPaint, onHover }: { sim: PlanetSim; tool: Tool; speed: number; onPaint: (power: GodPower, face: number) => void; onHover?: (face: number | null, x: number, y: number) => void }) {
   return (
     <Canvas camera={{ position: [0, 0.6, 2.6], fov: 45 }} onContextMenu={(e) => e.preventDefault()} style={{ cursor: tool === "hand" ? "grab" : "crosshair" }}>
       <color attach="background" args={["#04050c"]} />
@@ -266,7 +270,7 @@ export default function Globe({ sim, tool, speed, onPaint }: { sim: PlanetSim; t
       <Stars radius={60} depth={30} count={3000} factor={3} fade />
       <Clock sim={sim} speed={speed} />
       <FaceStart sim={sim} />
-      <PlanetMesh sim={sim} tool={tool} onPaint={onPaint} />
+      <PlanetMesh sim={sim} tool={tool} onPaint={onPaint} onHover={onHover} />
       <People sim={sim} />
       <Houses sim={sim} />
       <Atmosphere />
