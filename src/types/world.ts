@@ -1,18 +1,17 @@
 // The shared world-state schema. Every track reads and writes this shape, so change
 // it together (and tell the team) rather than adding private copies of fields.
 
-export type Terrain = "ocean" | "plains" | "forest" | "mountain" | "desert";
+// The planet itself is simulated in src/sim/planet.ts (typed arrays, ~27k tiles).
+// This file holds the summaries that the UI, the API routes and the LLM share.
 
-// The planet is split into 12 regions (one per vertex of an icosahedron), so the
-// renderer, the simulation and the narrator can all say "region 3" and mean the same place.
-export const REGION_COUNT = 12;
+// God powers the player can use. Brush powers paint an area; spawn and meteor act on a click.
+export type GodPower = "raise" | "lower" | "forest" | "rain" | "drought" | "fire" | "meteor" | "spawn" | "miracle";
 
-export interface Region {
-  id: number; // 0..11
-  terrain: Terrain;
-  population: number; // people living here
-  fertility: number; // 0-100, how much food this region can grow
-}
+// What the people's shared mind (the LLM) is focused on. The sim changes agent behaviour
+// for each one: expand founds more villages, farm grows more food, worship keeps faith up,
+// explore roams further, hoard eats less but has fewer children, rebel burns shrines.
+export type Policy = "settle" | "expand" | "farm" | "worship" | "explore" | "hoard" | "rebel";
+export const POLICIES: Policy[] = ["settle", "expand", "farm", "worship", "explore", "hoard", "rebel"];
 
 // Needs decay over time, like Millennium Bug's pet stats. 0 = collapse, 100 = perfect.
 export interface Needs {
@@ -21,7 +20,29 @@ export interface Needs {
   stability: number;
 }
 
-// Everything the LLM has invented about this civilisation. Null until genesis.
+// Planets are rich in different resources (see PLANET_TYPES in src/sim/planet.ts),
+// which is what makes trading between planets worth it. Herbs are medicine.
+export interface Resources {
+  food: number;
+  wood: number;
+  stone: number;
+  metal: number;
+  gold: number;
+  herbs: number;
+}
+
+export interface PlanetStats {
+  planetType: string; // e.g. "Timberworld"; decides which resources are plentiful
+  population: number;
+  villages: number;
+  ocean: number; // percentages of the planet's surface
+  forest: number;
+  desert: number;
+  mountains: number;
+  resources: Resources; // stockpiled, see PlanetSim.resources
+}
+
+// Everything the LLM has invented about this civilisation. Null until the first village.
 export interface Civ {
   name: string; // what they call themselves
   demonym: string; // e.g. "the Vael"
@@ -41,29 +62,29 @@ export type Attitude = "worship" | "fear" | "indifferent" | "resentful" | "hosti
 // Collapse states that the simulation triggers when needs fall too low.
 export type Crisis = "famine" | "revolution" | "cult";
 
-export type GodActionKind = "water" | "mountain" | "drought" | "miracle";
+export type ChronicleKind = GodPower | Crisis | "genesis" | "village" | "milestone" | "extinct" | "disaster" | "mind" | "contact";
 
-export interface GodAction {
-  kind: GodActionKind;
-  regionId: number;
-}
-
-export type ChronicleKind = GodActionKind | Crisis | "genesis" | "era" | "contact";
-
-// One line of the running history shown to the player. Written by the narrator.
+// One line of the running history shown to the player.
 export interface ChronicleEntry {
   year: number;
   kind: ChronicleKind;
   text: string;
 }
 
+// One line of conversation between the god (player) and the people's shared mind.
+export interface MindMessage {
+  from: "god" | "mind";
+  text: string;
+}
+
+// The snapshot sent to the LLM. Built from the live sim each time.
 export interface World {
   id: string;
-  ownerName: string;
-  year: number; // in-world years since genesis; the simulation advances this
-  regions: Region[];
+  year: number;
+  stats: PlanetStats;
   needs: Needs;
   crisis: Crisis | null;
+  policy: Policy;
   civ: Civ | null;
   chronicle: ChronicleEntry[]; // newest last
 }

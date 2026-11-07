@@ -18,7 +18,7 @@ export async function POST(req: Request) {
   if (kind === "genesis" || !world.civ) {
     const p = genesisPrompt(world);
     const g = ai ? await askJson(p.system, p.user, isGenesis, 700) : null;
-    const civ: Civ = g ? { ...FALLBACK_CIV, ...g.civ, attitude: "indifferent" } : FALLBACK_CIV;
+    const civ: Civ = g ? { ...FALLBACK_CIV, ...g.civ, attitude: "worship" } : FALLBACK_CIV;
     const entry: ChronicleEntry = { year: world.year, kind: "genesis", text: g?.text ?? `${civ.demonym[0].toUpperCase()}${civ.demonym.slice(1)} light their first fires and name their world ${civ.name}.` };
     return NextResponse.json({ civ, entry });
   }
