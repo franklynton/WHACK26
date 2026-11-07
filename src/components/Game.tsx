@@ -5,6 +5,8 @@
 // (src/sim/planet.ts) to the LLM routes (/api/narrate, /api/mind).
 import { useCallback, useEffect, useRef, useState } from "react";
 import Globe from "./Globe";
+import Upgrades, { affordableCount } from "./Upgrades";
+import { UPGRADES, type UpgradeId } from "@/sim/upgrades";
 import { PlanetSim, type SimEvent } from "@/sim/planet";
 import { fallbackCiv, fallbackReaction, fallbackThought } from "@/lib/narrator";
 import type { ChronicleEntry, ChronicleKind, Civ, Crisis, GodPower, MindMessage, NationInfo, Needs, PlanetStats, Policy, Relation, World } from "@/types/world";
@@ -46,6 +48,9 @@ interface Hud {
   needs: Needs;
   nations: NationInfo[];
   fate: PlanetSim["fate"];
+  output: number;
+  military: number;
+  levels: PlanetSim["levels"];
 }
 
 export default function Game({ playerName }: { playerName: string }) {
@@ -64,6 +69,7 @@ export default function Game({ playerName }: { playerName: string }) {
   const [sel, setSel] = useState(0); // the nation the god is looking at and talking to
   const [busy, setBusy] = useState<"" | "narrating" | "thinking">("");
   const [draft, setDraft] = useState("");
+  const [shop, setShop] = useState(false); // upgrades drawer open
   const [focus, setFocus] = useState<{ face: number; key: number } | null>(null); // where the camera flies to
   const [hover, setHover] = useState<{ id: number; x: number; y: number } | null>(null); // nation under the mouse
 
@@ -234,6 +240,16 @@ export default function Game({ playerName }: { playerName: string }) {
     pump();
   };
 
+  // Buying an upgrade: the people notice the gift and talk about it.
+  const buy = (id: UpgradeId) => {
+    if (!sim.buy(id)) return;
+    const u = UPGRADES.find((x) => x.id === id)!;
+    const text = `The god gave the planet ${u.name.toLowerCase()} (level ${sim.levels[id]}): ${u.effect.toLowerCase()}.`;
+    addEntry({ year: sim.year, kind: "milestone", text: `You built ${u.name.toLowerCase()} (level ${sim.levels[id]}). ${u.effect}.` });
+    sim.events.push({ kind: "milestone", detail: text, nation: sel });
+    setHud(readHud(sim));
+  };
+
   const { stats } = hud;
   const civ = civs[sel];
   const me = hud.nations[sel];
@@ -252,6 +268,16 @@ export default function Game({ playerName }: { playerName: string }) {
             Year {Math.floor(hud.year)} · God: {playerName}
           </p>
           <p className="text-2xl font-semibold">{sim.type.name}</p>
+          <div className="my-2 flex gap-2">
+            <div className="flex-1 rounded-lg bg-sky-400/15 px-2.5 py-1.5" title="Resources produced per year, weighted by value. Peace, trade and upgrades raise it.">
+              <p className="text-[10px] uppercase tracking-wider text-sky-200/70">Output / yr</p>
+              <p className="text-xl font-bold tabular-nums">{hud.output.toLocaleString()}</p>
+            </div>
+            <div className="flex-1 rounded-lg bg-white/5 px-2.5 py-1.5" title="Military strength, for invading other planets. Build an Army to raise it.">
+              <p className="text-[10px] uppercase tracking-wider text-white/50">Military</p>
+              <p className="text-xl font-bold tabular-nums">{hud.military}</p>
+            </div>
+          </div>
           <p className="text-xs text-white/45">{sim.type.blurb}</p>
           <p className="text-sm text-white/60">
             {stats.population.toLocaleString()} people · {stats.villages} {stats.villages === 1 ? "village" : "villages"}
@@ -321,6 +347,13 @@ export default function Game({ playerName }: { playerName: string }) {
             {cap(hud.fate.text)}
           </div>
         )}
+        {shop && <Upgrades resources={stats.resources} levels={hud.levels} onBuy={buy} onBarter={(f, t, n) => sim.barter(f, t, n) && setHud(readHud(sim))} />}
+        <button onClick={() => setShop((x) => !x)} className="glass pointer-events-auto px-4 py-2 text-sm font-semibold transition hover:bg-white/10">
+          ⬆️ Upgrades
+          {affordableCount(stats.resources, hud.levels) > 0 && (
+            <span className="ml-2 rounded-full bg-sky-400 px-1.5 text-xs text-slate-950">{affordableCount(stats.resources, hud.levels)}</span>
+          )}
+        </button>
         <p className="text-xs text-white/40">Drag to rotate · scroll to zoom · fate decides the weather, you can only talk</p>
       </div>
 
@@ -395,7 +428,7 @@ export default function Game({ playerName }: { playerName: string }) {
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
 
 function readHud(sim: PlanetSim): Hud {
-  return { year: sim.year, stats: sim.stats(), needs: sim.needs(), nations: sim.nationInfo(), fate: sim.fate };
+  return { year: sim.year, stats: sim.stats(), needs: sim.needs(), nations: sim.nationInfo(), fate: sim.fate, output: Math.round(sim.output), military: sim.military(), levels: { ...sim.levels } };
 }
 
 // Calls an LLM route. If the server can't be reached (for example the static demo build,

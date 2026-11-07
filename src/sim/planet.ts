@@ -3,6 +3,7 @@
 // mutated in place for speed; React only polls `snapshot()` a few times a second.
 import * as THREE from "three";
 import { fbm, tileRand } from "./noise";
+import { MAX_LEVEL, UPGRADES, VALUE, canAfford, upgradeCost, type UpgradeId } from "./upgrades";
 import type { Crisis, GodPower, NationInfo, Needs, PlanetStats, Policy, Relation, Resources } from "@/types/world";
 
 export const DETAIL = 36; // tiles = 20 * (DETAIL + 1)^2
@@ -134,6 +135,10 @@ export class PlanetSim {
   // Stockpiled resources: the planet's score, and later what it trades with other planets.
   // Production is scaled by stability, so a peaceful planet out-produces a troubled one.
   resources: Resources = { food: 0, wood: 0, stone: 0, metal: 0, gold: 0, herbs: 0 };
+  levels: Record<UpgradeId, number> = { irrigation: 0, stone: 0, medicine: 0, smithing: 0, temples: 0, markets: 0, army: 0 };
+  output = 0; // the planet's production per year, in value points (see VALUE): the score
+  private produced = 0; // value gathered since the last output sample
+  private outputTimer = 0;
   private nextId = 1;
   private milestones = new Set<string>();
 
@@ -467,6 +472,13 @@ export class PlanetSim {
 
   step(dt: number) {
     this.year += dt;
+    this.outputTimer += dt;
+    if (this.outputTimer >= 2) {
+      // Smoothed value gathered per year.
+      this.output = this.output * 0.6 + (this.produced / this.outputTimer) * 0.4;
+      this.produced = 0;
+      this.outputTimer = 0;
+    }
     this.stepFire(dt);
     this.stepFood(dt);
     this.stepPeople(dt);
@@ -515,7 +527,7 @@ export class PlanetSim {
         if (this.scorch[f] === 0) this.version++;
         continue;
       }
-      const grow = REGROW[this.terrain[f] as T] * (0.4 + this.moisture[f]) * (this.farm[f] ? 2.5 : 1);
+      const grow = REGROW[this.terrain[f] as T] * (0.4 + this.moisture[f]) * (this.farm[f] ? 2.5 : 1) * (1 + 0.3 * this.levels.irrigation);
       this.food[f] = Math.min(1, this.food[f] + grow * dt);
     }
   }
@@ -550,19 +562,20 @@ export class PlanetSim {
       // Villagers gather for the stockpile: surplus food, wood from forests, stone from mountains.
       // A stable nation works harder, and every trading partner adds a quarter more.
       if (home) {
-        const peace = (0.5 + nt.stability / 100) * (1 + 0.25 * this.tradePartners(p.nation));
+        const peace = (0.5 + nt.stability / 100) * (1 + (0.25 + 0.15 * this.levels.markets) * this.tradePartners(p.nation));
+        const tools = 1 + 0.3 * this.levels.smithing;
         const t = this.terrain[p.face] as T;
         if (p.hunger > 0.9 && this.food[p.face] > 0.2) {
           this.food[p.face] -= 0.1;
-          this.resources.food += 0.1 * peace * this.type.yield.food;
+          this.gain("food", 0.1 * peace * this.type.yield.food * (1 + 0.3 * this.levels.irrigation));
         }
         const y = this.type.yield;
-        if (t === T.Forest) this.resources.wood += 0.03 * peace * y.wood;
-        if (t === T.Rock) this.resources.stone += 0.05 * peace * y.stone;
+        if (t === T.Forest) this.gain("wood", 0.03 * peace * y.wood * tools);
+        if (t === T.Rock) this.gain("stone", 0.05 * peace * y.stone * tools);
         const d = this.deposit[p.face] as D;
-        if (d === D.Metal) this.resources.metal += 0.06 * peace * y.metal;
-        if (d === D.Gold) this.resources.gold += 0.03 * peace * y.gold;
-        if (d === D.Herbs) this.resources.herbs += 0.02 * peace * y.herbs;
+        if (d === D.Metal) this.gain("metal", 0.06 * peace * y.metal * tools);
+        if (d === D.Gold) this.gain("gold", 0.03 * peace * y.gold);
+        if (d === D.Herbs) this.gain("herbs", 0.02 * peace * y.herbs);
       }
 
       // War: fight any enemy on this tile or the next one. Either side may fall.
@@ -634,7 +647,7 @@ export class PlanetSim {
       }
     }
     this.people = this.people.filter((p) => {
-      if (p.hunger > 0 && p.age < 55 + (p.id % 25) + Math.min(20, this.resources.herbs / 20)) return true;
+      if (p.hunger > 0 && p.age < 55 + (p.id % 25) + Math.min(20, this.resources.herbs / 20) + 8 * this.levels.medicine) return true;
       if (p.hunger > -1) this.nations[p.nation].recentDeaths++; // war deaths were counted already
       return false;
     });
@@ -804,7 +817,7 @@ export class PlanetSim {
         const rel = this.relation[a][b];
         const touching = this.contact[a][b] > 0;
         let drift: number;
-        if (rel === "war") drift = -1; // war exhausts both sides
+        if (rel === "war") drift = -1 - 0.5 * this.levels.army; // war exhausts both sides; an army ends it sooner
         else {
           // Tension drifts towards a level set by what is going on between them.
           let level = 40 + 18 * Math.sin(this.year / 40 + a * 7.1 + b * 3.3); // old grudges come and go
@@ -814,7 +827,7 @@ export class PlanetSim {
           // Envy: a much bigger neighbour makes the smaller one nervous.
           const pa = this.people.filter((p) => p.nation === a).length, pb = this.people.filter((p) => p.nation === b).length;
           if (Math.max(pa, pb) > 2 * Math.max(1, Math.min(pa, pb))) level += 8;
-          if (rel === "trade") level -= 10;
+          if (rel === "trade") level -= 10 + 4 * this.levels.markets;
           drift = (level - this.tension[a][b]) * 0.04;
         }
         this.sway(a, b, drift * dt);
@@ -851,7 +864,7 @@ export class PlanetSim {
     for (const nt of this.nations) {
       if (!nt.alive) continue;
       const food = this.nationFood(nt.id);
-      const decay = nt.policy === "worship" ? 0.1 : nt.policy === "rebel" ? 1.2 : 0.3;
+      const decay = (nt.policy === "worship" ? 0.1 : nt.policy === "rebel" ? 1.2 : 0.3) * (1 - 0.25 * this.levels.temples);
       nt.faith = Math.max(0, nt.faith - decay * dt);
       // Rebels burn the god's shrines now and then.
       const mine = this.villages.filter((v) => v.nation === nt.id);
@@ -859,7 +872,7 @@ export class PlanetSim {
       nt.recentDeaths *= Math.pow(0.85, dt); // fades over a few seconds
       const wars = this.relation[nt.id].filter((r) => r === "war").length;
       const target =
-        (nt.policy === "worship" ? 50 : 40) + Math.min(30, mine.length * 4) + (food - 50) * 0.4 - Math.min(40, nt.recentDeaths * 1.5) - wars * 15 + this.tradePartners(nt.id) * 5;
+        (nt.policy === "worship" ? 50 : 40) + Math.min(30, mine.length * 4) + (food - 50) * 0.4 - Math.min(40, nt.recentDeaths * 1.5) - wars * 15 + this.tradePartners(nt.id) * 5 + 6 * this.levels.stone;
       nt.stability = Math.max(0, Math.min(100, nt.stability + (target - nt.stability) * 0.15 * dt));
     }
   }
@@ -927,7 +940,7 @@ export class PlanetSim {
         this.elevation[f] = Math.max(-1, Math.min(1, this.elevation[f] + (Math.random() - 0.5) * 0.25 * w));
         this.classify(f);
       }
-      this.villages = this.villages.filter((v) => this.angle(v.face, target) > 0.05 || Math.random() < 0.5);
+      this.villages = this.villages.filter((v) => this.angle(v.face, target) > 0.05 || Math.random() < 0.5 + 0.15 * this.levels.stone);
       this.killWhere((p) => isWater(this.terrain[p.face] as T));
     } else if (roll < 0.92) {
       kind = "flood";
@@ -940,7 +953,7 @@ export class PlanetSim {
     } else {
       kind = "plague";
       // Stockpiled herbs are medicine: they protect against plague.
-      const medicine = Math.min(0.8, this.resources.herbs / 200);
+      const medicine = 1 - (1 - Math.min(0.8, this.resources.herbs / 200)) * Math.pow(0.5, this.levels.medicine);
       this.killWhere((p) => this.angle(p.face, target) < 0.25 && Math.random() < 0.5 * (1 - medicine));
     }
     const dead = before - this.people.length;
@@ -1019,6 +1032,42 @@ export class PlanetSim {
         .filter((o) => o.id !== nt.id && o.alive)
         .map((o) => ({ id: o.id, relation: this.relation[nt.id][o.id], tension: Math.round(this.tension[nt.id][o.id]) })),
     }));
+  }
+
+  // ---- Economy ----
+
+  private gain(r: keyof Resources, amount: number) {
+    this.resources[r] += amount;
+    this.produced += amount * VALUE[r];
+  }
+
+  // Military strength (for invading other planets later): trained soldiers plus their weapons.
+  military() {
+    const adults = this.people.filter((p) => p.age > 16 && p.age < 50).length;
+    return Math.round(this.levels.army * 10 + (adults * this.levels.army) / 4 + Math.min(30, this.resources.metal / 20));
+  }
+
+  // Spend resources on the next level of an upgrade. Returns false if it can't be bought.
+  buy(id: UpgradeId): boolean {
+    const u = UPGRADES.find((x) => x.id === id)!;
+    const level = this.levels[id];
+    const cost = upgradeCost(u, level);
+    if (level >= MAX_LEVEL || !canAfford(this.resources, cost)) return false;
+    for (const [r, n] of Object.entries(cost)) this.resources[r as keyof Resources] -= n as number;
+    this.levels[id] = level + 1;
+    for (const nt of this.nations) if (nt.alive) nt.faith = Math.min(100, nt.faith + 5); // a gift from their god
+    return true;
+  }
+
+  // Swap resources with travelling merchants at a poor rate (half the value is lost).
+  // Trading with other players' planets will be the better deal.
+  barter(from: keyof Resources, to: keyof Resources, amount: number): number {
+    if (from === to || this.resources[from] < amount) return 0;
+    const got = Math.floor((amount * VALUE[from] * 0.5) / VALUE[to]);
+    if (got <= 0) return 0;
+    this.resources[from] -= amount;
+    this.resources[to] += got;
+    return got;
   }
 
   stats(): PlanetStats {
