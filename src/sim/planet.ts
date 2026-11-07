@@ -62,6 +62,12 @@ const SOUNDS = [
   { start: ["Bra", "Gro", "Hal", "Fen", "Wyr", "Cal", "Sten"], mid: ["e", "a", "o", ""], end: ["wick", "ford", "stead", "by", "mere", "ton"] },
   { start: ["Ama", "Ixi", "Tla", "Coa", "Yu", "Pa", "Nah"], mid: ["ca", "to", "li", "hu", "ma"], end: ["tlan", "pec", "co", "lan", "tzin", "pa"] },
 ];
+// A random name for a nation until its mind names itself, so no two planets start alike.
+const placeholderWord = (i: number) => {
+  const s = SOUNDS[(i + Math.floor(Math.random() * SOUNDS.length)) % SOUNDS.length];
+  const pick = (a: string[]) => a[Math.floor(Math.random() * a.length)];
+  return pick(s.start) + pick(s.end);
+};
 const TIER_NAME = ["village", "town", "city"] as const;
 const TIER_AT = [0, 12, 30]; // residents needed to grow into a town, then a city
 const TIER_HOUSES = [16, 26, 38];
@@ -143,7 +149,6 @@ export function nationColor(i: number) {
 }
 
 export const NATION_COLORS = ["#ff2bd6", "#00f0ff", "#a24dff", "#ff1f4b", "#3d5aff"]; // neon, so borders pop against the terrain
-const NATION_HUES = ["Rose", "Azure", "Violet", "Crimson", "Cobalt"]; // placeholder names until each mind names itself
 
 // Something the narrator might want to talk about.
 export interface SimEvent {
@@ -517,7 +522,7 @@ export class PlanetSim {
     const pool = RACES.map((r) => r.id).filter((r) => r !== firstRace).sort(() => Math.random() - 0.5);
     const races = starts.map((_, i) => (i === 0 && firstRace ? firstRace : pool[(i - (firstRace ? 1 : 0)) % pool.length]));
     this.nations = starts.map((_, i) => ({
-      id: i, name: `the ${NATION_HUES[i]} ${RACE[races[i]].plural}`, color: NATION_COLORS[i], policy: "settle" as Policy, faith: 100, stability: 70, recentDeaths: 0, alive: true,
+      id: i, name: `the ${placeholderWord(i)} ${RACE[races[i]].plural}`, color: NATION_COLORS[i], policy: "settle" as Policy, faith: 100, stability: 70, recentDeaths: 0, alive: true,
       race: races[i], tech: 0, leader: makeLeader(RACE[races[i]]),
     }));
     const k = this.nations.length;
@@ -1474,8 +1479,7 @@ export class PlanetSim {
   // A new nation: grows every nation-by-nation table by one row and column.
   addNation(name?: string) {
     const id = this.nations.length;
-    const sounds = SOUNDS[id % SOUNDS.length];
-    const word = sounds.start[Math.floor(Math.random() * sounds.start.length)] + sounds.end[Math.floor(Math.random() * sounds.end.length)];
+    const word = placeholderWord(id);
     const race = RACES[Math.floor(Math.random() * RACES.length)].id;
     this.nations.push({
       id, name: name ?? `the ${word} ${RACE[race].plural}`, color: nationColor(id), policy: "settle", faith: 100, stability: 60, recentDeaths: 0, alive: true,
