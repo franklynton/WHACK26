@@ -30,7 +30,67 @@ interface Action {
   message: string;
 }
 
+interface MarketOrder {
+  id: number;
+  world_id: string;
+  side: "buy" | "sell";
+  resource: keyof Resources;
+  price: number;
+  quantity: number;
+  remaining: number;
+  status: string;
+  created_at: string;
+}
+
+interface MarketTrade {
+  id: number;
+  resource: keyof Resources;
+  price: number;
+  quantity: number;
+  buyer_world_id: string;
+  seller_world_id: string;
+  created_at: string;
+}
+
+interface MarketPrice {
+  resource: keyof Resources;
+  base_price: number;
+  current_price: number;
+}
+
+interface MarketPricePoint {
+  resource: keyof Resources;
+  price: number;
+  created_at: string;
+}
+
 const RESOURCES = ["food", "wood", "stone", "metal", "gold", "herbs"] as const;
+
+function MarketChart({ base, points }: { base: number; points: MarketPricePoint[] }) {
+  const values = points.length ? points.map((point) => Number(point.price)) : [base];
+  const min = Math.max(0, Math.min(base, ...values) - 1);
+  const max = Math.max(base, ...values) + 1;
+  const range = Math.max(1, max - min);
+  const coordinates = values.map((value, index) => {
+    const x = values.length === 1 ? 160 : 4 + (index / (values.length - 1)) * 312;
+    const y = 92 - ((value - min) / range) * 84;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  const current = values[values.length - 1];
+
+  return (
+    <div className="mt-2 rounded-lg border border-white/[0.07] bg-black/10 px-3 py-2">
+      <div className="mb-1 flex items-center justify-between text-xs">
+        <span className="text-white/55">Price history</span>
+        <span className="font-semibold text-amber-200">{current.toLocaleString()} credits</span>
+      </div>
+      <svg viewBox="0 0 320 96" className="h-16 w-full" role="img" aria-label={`Current price ${current} credits`}>
+        {[0, 46, 92].map((y) => <line key={y} x1="4" x2="316" y1={y} y2={y} className="stroke-white/10" strokeWidth="1" />)}
+        <polyline points={coordinates.join(" ")} fill="none" className="stroke-amber-300" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+      </svg>
+    </div>
+  );
+}
 
 // A random id kept in this browser, so a player keeps one planet row (and the secret token that owns it).
 function stored(key: string) {
@@ -58,8 +118,8 @@ export interface GalaxyStatus {
 }
 
 export default function Galaxy({
-  sim, ownerName, planetName, demo, spacefaring, open, onClose, onStatus,
-}: { sim: PlanetSim; ownerName: string; planetName: string; demo?: boolean; spacefaring: boolean; open: boolean; onClose: () => void; onStatus?: (s: GalaxyStatus) => void }) {
+  sim, ownerName, planetName, demo, spacefaring, open, view = null, onClose, onStatus,
+}: { sim: PlanetSim; ownerName: string; planetName: string; demo?: boolean; spacefaring: boolean; open: boolean; view?: "market" | "invade" | "join" | null; onClose: () => void; onStatus?: (s: GalaxyStatus) => void }) {
   const since = useRef<number | null>(null);
   const names = useRef(new Map<string, string>());
   const wanted = useRef<string | null>(null); // the galaxy we mean to be in (kept in the browser, so a refresh rejoins it)
@@ -76,6 +136,22 @@ export default function Galaxy({
   const [resource, setResource] = useState<keyof Resources>("gold");
   const [amount, setAmount] = useState(10);
   const [message, setMessage] = useState("");
+  const [marketOrders, setMarketOrders] = useState<MarketOrder[]>([]);
+  const [marketTrades, setMarketTrades] = useState<MarketTrade[]>([]);
+  const [marketSide, setMarketSide] = useState<"buy" | "sell">("buy");
+  const [marketResource, setMarketResource] = useState<keyof Resources>("gold");
+  const [marketPrice, setMarketPrice] = useState(10);
+  const [marketQuantity, setMarketQuantity] = useState(10);
+  const [credits, setCredits] = useState(1000);
+  const [marketOpen, setMarketOpen] = useState(false);
+  const [marketPrices, setMarketPrices] = useState<MarketPrice[]>([]);
+  const [marketHistory, setMarketHistory] = useState<MarketPricePoint[]>([]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (view === "market") setMarketOpen(true);
+    if (view === "invade") setMarketOpen(false);
+  }, [open, view]);
 
   // This planet's id and the secret token that owns its row. The demo is a separate planet, so it gets its own.
   const [ids] = useState(() => ({ world: stored(`arda-world-id${demo ? "-demo" : ""}`), token: stored(`arda-owner-token${demo ? "-demo" : ""}`) }));
@@ -141,6 +217,23 @@ export default function Galaxy({
     [sim, post],
   );
 
+  const loadMarket = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/galaxy?market=1&worldId=${encodeURIComponent(ids.world)}`);
+      const data = await res.json();
+      if (!res.ok) return;
+      setMarketOrders((data.orders ?? []) as MarketOrder[]);
+      setMarketTrades((data.trades ?? []) as MarketTrade[]);
+      setMarketPrices((data.prices ?? []) as MarketPrice[]);
+      setMarketHistory((data.history ?? []) as MarketPricePoint[]);
+      const me = data.me as { credits?: number; resources?: Record<string, number> } | null;
+      if (me?.credits != null) {
+        setCredits(Number(me.credits));
+        sim.marketSync((me.resources ?? sim.stats().resources) as Resources, Number(me.credits));
+      }
+    } catch {}
+  }, [ids, sim]);
+
   const load = useCallback(async () => {
     try {
       const q = `worldId=${encodeURIComponent(ids.world)}${since.current != null ? `&since=${since.current}` : ""}`;
@@ -193,6 +286,17 @@ export default function Galaxy({
     return () => window.clearInterval(timer);
   }, [sync]);
 
+  useEffect(() => {
+    if (!marketOpen || !galaxy) return;
+    void loadMarket();
+    const timer = window.setInterval(() => void loadMarket(), 5000);
+    return () => window.clearInterval(timer);
+  }, [marketOpen, galaxy, loadMarket]);
+
+  useEffect(() => {
+    if (!open) setMarketOpen(false);
+  }, [open]);
+
   // The HUD shows whether we're connected, which galaxy we're in and how full it is.
   useEffect(() => {
     const solo = rooms ? !galaxy : aloneLocal;
@@ -205,6 +309,7 @@ export default function Galaxy({
     setWantedGalaxy(null);
     setGalaxy(null);
     setPlanets([]);
+    setMarketOpen(false);
     seen.current = null;
     try {
       await post({ action: "leave" });
@@ -213,6 +318,57 @@ export default function Galaxy({
     setMessage(`You left galaxy ${was} and are playing alone. Your planet keeps everything it traded, won or lost.`);
   };
 
+  const placeMarketOrder = async () => {
+    if (!galaxy) return setMessage("Join a galaxy before placing an order.");
+    const { data } = await post({
+      action: "place_order",
+      side: marketSide,
+      resource: marketResource,
+      price: marketPrice,
+      quantity: marketQuantity,
+    });
+    setMessage(data.error || `Order ${data.status ?? "placed"}${data.remaining != null ? ` (${data.remaining} remaining)` : ""}`);
+    await loadMarket();
+  };
+
+  const cancelMarketOrder = async (orderId: number) => {
+    const { data } = await post({ action: "cancel_order", orderId });
+    setMessage(data.error || "Order cancelled.");
+    await loadMarket();
+  };
+
+  const createRandomGalaxy = async () => {
+    const code = String(10000 + Math.floor(Math.random() * 90000));
+    await join(code);
+  };
+
+  const joinRandomGalaxy = async () => {
+    if (joining.current) return;
+    joining.current = true;
+    try {
+      const { data } = await post({ action: "random_join" });
+      if (data.ok) {
+        setGalaxy(data.galaxy);
+        setError("");
+        setDraft("");
+        setSwitching(false);
+        setWantedGalaxy(data.galaxy);
+        wanted.current = data.galaxy;
+        setMessage(data.created ? `You created galaxy ${data.galaxy}.` : `You joined galaxy ${data.galaxy}.`);
+        sim.galaxyNews(
+          "🌌",
+          data.created ? "A new galaxy" : "A random galaxy",
+          data.created ? `You created galaxy ${data.galaxy}.` : `You joined galaxy ${data.galaxy} (${data.members}/${GALAXY_MAX} gods).`,
+        );
+      } else {
+        setError(joinError(data.reason, data.galaxy ?? "", data.members));
+      }
+    } catch {
+      setError("Couldn't find a galaxy. Try again.");
+    } finally {
+      joining.current = false;
+    }
+  };
 
 
   const act = async (action: "trade" | "invasion", target: string) => {
@@ -274,72 +430,155 @@ export default function Galaxy({
   );
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="glass max-h-[80vh] w-[28rem] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-3 flex items-center justify-between">
-          <p className="text-xl font-bold">🌌 The galaxy</p>
-          <button onClick={onClose} className="text-white/50 hover:text-white" aria-label="Close">
-            ✕
-          </button>
+      <div className="glass max-h-[82vh] w-[44rem] overflow-y-auto p-4" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-4 flex items-center justify-between border-b border-white/10 pb-3">
+          <div>
+            <p className="text-lg font-bold">🌌 Galaxy</p>
+            {galaxy && (
+              <p className="mt-0.5 font-mono text-xs text-indigo-200">
+                {galaxy} <span className="text-white/40">· {members}/{GALAXY_MAX} gods</span>
+              </p>
+            )}
+          </div>
+          <div className="flex items-center gap-1">
+            {galaxy && (
+              <>
+                <button
+                  onClick={() => setSwitching((v) => !v)}
+                  className="rounded-lg border border-indigo-300/20 bg-indigo-400/10 px-3 py-1.5 text-xs font-semibold text-indigo-100 hover:bg-indigo-400/20"
+                >
+                  ⇄ Switch galaxy
+                </button>
+                <button onClick={leave} className="rounded-lg border border-rose-300/20 bg-rose-400/10 px-3 py-1.5 text-xs font-semibold text-rose-100 hover:bg-rose-400/20">
+                  ✕ Leave galaxy
+                </button>
+              </>
+            )}
+            <button onClick={onClose} className="ml-1 rounded-lg px-2 py-1.5 text-white/50 hover:bg-white/5 hover:text-white" aria-label="Close">
+              ✕
+            </button>
+          </div>
         </div>
-        <p className="mb-3 text-sm text-white/65">
-          {spacefaring
-            ? <>Your people have left {planetName}. Send resources to other gods&apos; planets in your galaxy, or invade them for gold.</>
-            : <>Gather with other gods now. Once your people reach the Space Age, you can trade with or invade the planets in your galaxy.</>}
-        </p>
 
-        {enabled === false && <p className="mb-3 text-sm text-amber-200">{message || "The galaxy is offline: Supabase isn't configured yet."}</p>}
-        {enabled && !rooms && <p className="mb-3 text-xs text-amber-200">Galaxy rooms aren&apos;t set up yet (run migration 003 in Supabase). Until then, every god online shares one galaxy.</p>}
+        {enabled === false && <p className="rounded-lg bg-amber-400/10 px-3 py-2 text-sm text-amber-200">{message || "Galaxy connection unavailable."}</p>}
+        {enabled && !rooms && <p className="mb-3 text-xs text-amber-200">Galaxy rooms aren&apos;t set up yet. Everyone online currently shares the galaxy.</p>}
 
-        {/* Playing alone (in no galaxy): join one by its code, or create it with a new code */}
-        {enabled && rooms && !galaxy && (
-          <div className="mb-3 rounded-lg bg-white/5 p-3">
-            <p className="mb-2 text-xs text-white/60">🧘 You&apos;re playing alone, so trading and invading are off.</p>
-            {codeForm("Join a galaxy", `Enter a friend's code to join their galaxy, or a new code to create one. Up to ${GALAXY_MAX} gods per galaxy.`)}
-            {message && !error && <p className="mt-2 text-xs text-sky-200">{message}</p>}
+        {switching && galaxy && (
+          <div className="mb-4 rounded-lg bg-white/5 p-3">
+            {codeForm("Switch galaxy", `Leave ${galaxy} and join another galaxy. If the new galaxy is full, you stay in ${galaxy}.`, () => {
+              setSwitching(false);
+              setError("");
+            })}
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <button onClick={createRandomGalaxy} className="rounded-lg border border-indigo-300/20 bg-indigo-400/15 px-3 py-2 text-xs font-semibold text-indigo-100 hover:bg-indigo-400/25">
+                + Create random galaxy
+              </button>
+              <button onClick={joinRandomGalaxy} className="rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-3 py-2 text-xs font-semibold text-emerald-100 hover:bg-emerald-400/20">
+                🎲 Join random galaxy
+              </button>
+            </div>
           </div>
         )}
 
-        {/* In a galaxy: who's here, how full it is, and a way out */}
+        {enabled && rooms && !galaxy && (
+          <div className="rounded-lg bg-white/[0.035] p-4">
+            <p className="mb-3 text-sm text-white/60">Join a galaxy to trade or invade other planets.</p>
+            <div className="mb-3 grid grid-cols-2 gap-2">
+              <button onClick={createRandomGalaxy} className="rounded-lg border border-indigo-300/20 bg-indigo-400/15 px-3 py-2.5 text-sm font-semibold text-indigo-100 hover:bg-indigo-400/25">
+                + Create galaxy
+                <span className="block text-[10px] font-normal text-indigo-200/60">Generates a 5-digit code</span>
+              </button>
+              <button onClick={joinRandomGalaxy} className="rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-3 py-2.5 text-sm font-semibold text-emerald-100 hover:bg-emerald-400/20">
+                🎲 Join random
+                <span className="block text-[10px] font-normal text-emerald-200/60">Join an available galaxy</span>
+              </button>
+            </div>
+            {codeForm("Galaxy code", "Use a friend's code, or enter a new one to create a galaxy.")}
+            {message && !error && <p className="mt-3 text-xs text-sky-200">{message}</p>}
+          </div>
+        )}
+
         {enabled && rooms && galaxy && (
-          <div className="mb-3 rounded-lg bg-white/5 p-3">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-sm">
-                Galaxy <span className="font-mono font-bold text-indigo-200">{galaxy}</span>
-                <span className="text-white/50">
-                  {" "}· {members}/{GALAXY_MAX} gods
-                </span>
+          <div className="mb-4 grid grid-cols-2 gap-2">
+            <button
+              onClick={() => setMarketOpen(false)}
+              className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${!marketOpen ? "bg-rose-400/20 text-rose-100 ring-1 ring-rose-300/20" : "bg-white/5 text-white/55 hover:text-white"}`}
+            >
+              ⚔ Invade
+            </button>
+            <button
+              onClick={() => setMarketOpen(true)}
+              className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${marketOpen ? "bg-amber-400/20 text-amber-100 ring-1 ring-amber-300/20" : "bg-white/5 text-white/55 hover:text-white"}`}
+            >
+              ⚖ Market
+            </button>
+          </div>
+        )}
+
+        {enabled && rooms && galaxy && marketOpen && (
+          <div>
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex gap-1">
+                {RESOURCES.map((item) => (
+                  <button
+                    key={item}
+                    onClick={() => setMarketResource(item)}
+                    className={`rounded-full px-2.5 py-1 text-xs capitalize transition ${marketResource === item ? "bg-amber-400/20 text-amber-100" : "text-white/45 hover:bg-white/5 hover:text-white"}`}
+                  >
+                    {item}
+                  </button>
+                ))}
+              </div>
+              <span className="text-xs font-semibold text-amber-200">{credits.toLocaleString()} credits</span>
+            </div>
+            <MarketChart
+              base={marketPrices.find((price) => price.resource === marketResource)?.base_price ?? 10}
+              points={marketHistory.filter((point) => point.resource === marketResource)}
+            />
+            <div className="mt-3 grid grid-cols-[8rem_1fr_1fr] items-end gap-2">
+              <div className="grid grid-cols-2 gap-1 rounded-lg bg-white/5 p-1">
+                {(["buy", "sell"] as const).map((side) => (
+                  <button key={side} onClick={() => setMarketSide(side)} className={`rounded-md px-2 py-1.5 text-xs capitalize ${marketSide === side ? (side === "buy" ? "bg-emerald-400/20 text-emerald-100" : "bg-rose-400/20 text-rose-100") : "text-white/45"}`}>
+                    {side}
+                  </button>
+                ))}
+              </div>
+              <label className="text-xs text-white/45">Credits / unit
+                <input type="number" min={1} max={1000000000} value={marketPrice} onChange={(e) => setMarketPrice(Math.max(1, Number(e.target.value) || 1))} className="mt-1 w-full rounded bg-white/10 px-2 py-1 text-white" />
+              </label>
+              <label className="text-xs text-white/60">Quantity
+                <input type="number" min={1} max={100000} value={marketQuantity} onChange={(e) => setMarketQuantity(Math.max(1, Number(e.target.value) || 1))} className="mt-1 w-full rounded bg-white/10 px-2 py-1 text-white" />
+              </label>
+            </div>
+            <button onClick={placeMarketOrder} className="mt-2 w-full rounded bg-indigo-400/25 px-3 py-1.5 text-xs font-semibold text-indigo-100 hover:bg-indigo-400/35">
+              Place {marketSide} order
+            </button>
+
+            <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+              <div>
+                <p className="mb-1 font-semibold text-emerald-200">Bids</p>
+                {marketOrders.filter((o) => o.side === "buy" && o.resource === marketResource).sort((a, b) => b.price - a.price || a.created_at.localeCompare(b.created_at)).slice(0, 8).map((o) => (
+                  <div key={o.id} className="flex justify-between border-t border-white/5 py-1">
+                    <span>{o.remaining} × {o.price}</span>
+                    {o.world_id === ids.world ? <button onClick={() => cancelMarketOrder(o.id)} className="text-rose-300">Cancel</button> : <span className="text-white/35">bid</span>}
+                  </div>
+                ))}
+              </div>
+              <div>
+                <p className="mb-1 font-semibold text-rose-200">Asks</p>
+                {marketOrders.filter((o) => o.side === "sell" && o.resource === marketResource).sort((a, b) => a.price - b.price || a.created_at.localeCompare(b.created_at)).slice(0, 8).map((o) => (
+                  <div key={o.id} className="flex justify-between border-t border-white/5 py-1">
+                    <span>{o.remaining} × {o.price}</span>
+                    {o.world_id === ids.world ? <button onClick={() => cancelMarketOrder(o.id)} className="text-rose-300">Cancel</button> : <span className="text-white/35">ask</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+            {marketTrades.length > 0 && (
+              <p className="mt-2 border-t border-white/10 pt-2 text-xs text-white/55">
+                Last: {marketTrades[0].quantity} {marketTrades[0].resource} at {marketTrades[0].price} credits
               </p>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => {
-                    setSwitching((v) => !v);
-                    setDraft("");
-                    setError("");
-                  }}
-                  className="text-xs text-indigo-200 hover:text-white"
-                  title="Leave this galaxy and join or create another"
-                >
-                  Switch
-                </button>
-                <button onClick={leave} className="text-xs text-rose-300 hover:text-rose-200" title="Leave the galaxy and play on your own (no trading or invading)">
-                  Play alone
-                </button>
-              </div>
-            </div>
-            <div className="mt-2 flex gap-1" aria-hidden>
-              {Array.from({ length: GALAXY_MAX }, (_, i) => (
-                <span key={i} className={`h-1.5 flex-1 rounded-full ${i < members ? "bg-indigo-300" : "bg-white/10"}`} />
-              ))}
-            </div>
-            {switching && (
-              <div className="mt-3 border-t border-white/10 pt-3">
-                {codeForm("Switch galaxy", `You'll leave ${galaxy} and join this one. If it's full, you stay in ${galaxy}.`, () => {
-                  setSwitching(false);
-                  setError("");
-                })}
-              </div>
             )}
-            {message && !error && <p className="mt-2 text-xs text-sky-200">{message}</p>}
           </div>
         )}
 
@@ -353,11 +592,11 @@ export default function Galaxy({
           </div>
         )}
 
-        {enabled && !alone && planets.length === 0 && (
+        {!marketOpen && enabled && !alone && planets.length === 0 && (
           <p className="text-sm text-white/50">You&apos;re the only god here{galaxy ? `. Share the code ${galaxy} so others can join` : ""}.</p>
         )}
-        {enabled && !spacefaring && shown.length > 0 && <p className="mb-2 text-xs text-white/45">🔒 Trading and invading unlock when your people reach the Space Age.</p>}
-        {enabled && shown.length > 0 && (
+        {!marketOpen && enabled && !spacefaring && shown.length > 0 && <p className="mb-2 text-xs text-white/45">Invading unlocks when your people reach the Space Age.</p>}
+        {!marketOpen && enabled && shown.length > 0 && (
           <>
             <div className="mb-3 flex gap-2">
               {/* Buttons, not a native <select>: the HUD re-renders a few times a second as stocks change, which made an open dropdown flicker and close. */}

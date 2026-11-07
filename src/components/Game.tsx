@@ -1,7 +1,7 @@
 "use client";
 // The game screen: the globe in the middle, the planet and its nations on the left,
 // the god powers along the bottom, and the chosen nation's mind on the right.
-// Each nation has its own AI mind, religion and chat. This file wires the sim
+// Each nation has its own AI mind and religion. This file wires the sim
 // (src/sim/planet.ts) to the LLM routes (/api/narrate, /api/mind).
 import { useCallback, useEffect, useRef, useState } from "react";
 import Globe from "./Globe";
@@ -160,7 +160,7 @@ export default function Game({
   const [hud, setHud] = useState<Hud>(() => readHud(sim));
   const [miracle, setMiracle] = useState<MiracleId | null>(null); // picked from the bar; click the land to cast
   const [seenOutcome, setSeenOutcome] = useState(false);
-  const [galaxy, setGalaxy] = useState(false);
+  const [galaxy, setGalaxy] = useState<"market" | "invade" | "join" | null>(null);
   const [upgradesOpen, setUpgradesOpen] = useState(false);
   const resourcesPanelRef = useRef<HTMLDivElement>(null);
   const upgradesMenuRef = useRef<HTMLDivElement>(null);
@@ -201,7 +201,6 @@ export default function Game({
   );
   const [sel, setSel] = useState(() => ui?.sel ?? 0); // the nation the god is looking at and talking to
   const [busy, setBusy] = useState<"" | "narrating" | "thinking">("");
-  const [draft, setDraft] = useState("");
   const [focus, setFocus] = useState<{ face: number; key: number } | null>(
     null,
   ); // where the camera flies to
@@ -512,17 +511,6 @@ export default function Game({
     setHover(id >= 0 ? { id, x, y } : null);
   };
 
-  // The god's words go into the chosen nation's chat; its mind answers as soon as it is free.
-  const speak = (e: React.FormEvent) => {
-    e.preventDefault();
-    const text = draft.trim();
-    if (!text || !civs[sel]) return;
-    setDraft("");
-    addChat(sel, { from: "god", text });
-    answerDue.current = sel;
-    pump();
-  };
-
   // An audience with a leader. They speak first when you arrive, then answer each thing you say.
   // What they decide changes the sim: a new focus for their people, or friendship or hostility to a neighbour.
   const askLeader = async (id: number, history: LeaderMessage[]) => {
@@ -593,7 +581,6 @@ export default function Game({
   const { stats } = hud;
   const civ = civs[sel];
   const me = hud.nations[sel];
-  const chat = chats[sel];
   const awake = civs.filter(Boolean).length;
   const availableUpgrades = UPGRADES.filter((upgrade) => {
     const cost = upgrade.costs[sim.upgrades[upgrade.id]];
@@ -782,7 +769,7 @@ export default function Game({
             </button>
           )}
           <button
-            onClick={() => setGalaxy(true)}
+            onClick={() => setGalaxy("join")}
             className={`rounded-lg px-2.5 py-1 text-sm transition ${hud.god.spacefaring ? "bg-indigo-400/25 font-semibold hover:bg-indigo-400/40" : "bg-white/5 hover:bg-white/10"}`}
             title={hud.god.spacefaring ? "Trade with or invade the planets in your galaxy" : `Join or leave a galaxy. Trading and invading unlock at the Space Age (your nation is in the ${ERAS[hud.nations[0]?.era ?? 0]})`}
           >
@@ -1105,48 +1092,46 @@ export default function Game({
           )}
         </div>
 
-        <p className="label mb-2">
-          Voice of {civ ? civ.demonym : "the people"}{" "}
-          {busy === "thinking" && (
-            <span className="animate-pulse">· thinking…</span>
-          )}
-        </p>
-        <ol className="mb-2 max-h-[28%] space-y-2 overflow-y-auto text-sm">
-          {chat.map((m, i) => (
-            <li
-              key={i}
-              className={
-                m.from === "god"
-                  ? "text-right text-sky-200"
-                  : "italic text-amber-100"
-              }
+        {/* Nation chat is temporarily hidden while the galaxy controls take the spotlight. */}
+        <div className="mb-4 border-b border-white/10 pb-4">
+          <p className="label mb-2">Galaxy</p>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              disabled={!link.galaxy || !hud.god.spacefaring}
+              onClick={() => setGalaxy("invade")}
+              className="group rounded-lg border border-rose-300/15 bg-rose-400/10 px-3 py-3 text-left transition hover:border-rose-300/30 hover:bg-rose-400/20 disabled:cursor-not-allowed disabled:border-white/5 disabled:bg-white/[0.03] disabled:text-white/30"
+              title={!link.galaxy ? "Join a galaxy to invade" : !hud.god.spacefaring ? "Reach the Space Age to invade" : "Choose a planet to invade"}
             >
-              {m.text}
-            </li>
-          ))}
-          {!chat.length && (
-            <li className="text-white/40">
-              {civ ? "They will speak to you soon." : "…"}
-            </li>
-          )}
-        </ol>
-        <form onSubmit={speak} className="mb-4 flex gap-2">
-          <input
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            disabled={!civ || !me.alive}
-            placeholder={
-              civ ? `Speak to ${civ.demonym}…` : "No one to hear you yet"
-            }
-            className="min-w-0 flex-1 rounded-lg bg-white/10 px-3 py-1.5 text-sm outline-none placeholder:text-white/30 focus:bg-white/15"
-          />
+              <span className="block text-lg">⚔️</span>
+              <span className="mt-1 block text-sm font-semibold">Invade</span>
+              <span className="block text-[10px] text-current opacity-60">
+                {!link.galaxy ? "Join a galaxy first" : !hud.god.spacefaring ? "Space Age required" : "Launch an attack"}
+              </span>
+            </button>
+            <button
+              disabled={!link.galaxy}
+              onClick={() => setGalaxy("market")}
+              className="group rounded-lg border border-amber-300/15 bg-amber-400/10 px-3 py-3 text-left transition hover:border-amber-300/30 hover:bg-amber-400/20 disabled:cursor-not-allowed disabled:border-white/5 disabled:bg-white/[0.03] disabled:text-white/30"
+              title={!link.galaxy ? "Join a galaxy to use the market" : "Open the galaxy market"}
+            >
+              <span className="block text-lg">⚖️</span>
+              <span className="mt-1 block text-sm font-semibold">Market</span>
+              <span className="block text-[10px] text-current opacity-60">
+                {!link.galaxy ? "Join a galaxy first" : "Trade resources"}
+              </span>
+            </button>
+          </div>
           <button
-            disabled={!civ || !draft.trim()}
-            className="rounded-lg bg-sky-400/20 px-3 text-sm disabled:opacity-30"
+            onClick={() => setGalaxy("join")}
+            className={`mt-2 w-full rounded-lg px-3 py-2 text-sm font-semibold transition ${
+              link.galaxy
+                ? "bg-indigo-400/15 text-indigo-100 hover:bg-indigo-400/25"
+                : "bg-indigo-400/30 text-white hover:bg-indigo-400/40"
+            }`}
           >
-            Speak
+            {link.galaxy ? `Galaxy ${link.galaxy} · Manage` : "🌌 Join a galaxy"}
           </button>
-        </form>
+        </div>
 
         <p className="label mb-2">
           Chronicle{" "}
@@ -1192,7 +1177,17 @@ export default function Game({
         </div>
       )}
       {/* The galaxy (multiplayer): always syncing; join or leave any time, trade and invade from the Space Age */}
-      <Galaxy sim={sim} ownerName={playerName} planetName={planetName} demo={demo} spacefaring={hud.god.spacefaring} open={galaxy} onClose={() => setGalaxy(false)} onStatus={setLink} />
+      <Galaxy
+        sim={sim}
+        ownerName={playerName}
+        planetName={planetName}
+        demo={demo}
+        spacefaring={hud.god.spacefaring}
+        open={galaxy !== null}
+        view={galaxy}
+        onClose={() => setGalaxy(null)}
+        onStatus={setLink}
+      />
     </main>
   );
 }

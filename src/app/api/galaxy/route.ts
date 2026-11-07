@@ -48,12 +48,50 @@ export async function GET(req: Request) {
   // Which galaxy are we in? (null: none yet)
   let rooms = true;
   let galaxy: string | null = null;
+  let me: { galaxy?: string | null; credits?: number; resources?: Record<string, number> } | null = null;
   if (worldId) {
-    const { data: me, error } = await supabase.from("planets").select("galaxy").eq("world_id", worldId).maybeSingle();
+    const { data: planetData, error } = await supabase.from("planets").select("galaxy, credits, resources").eq("world_id", worldId).maybeSingle();
     if (notMigrated(error)) rooms = false;
     else if (error?.code === "PGRST205" || error?.message?.includes("public.planets")) {
       return NextResponse.json({ error: "Galaxy migration not applied: public.planets is missing", enabled: false }, { status: 503 });
-    } else galaxy = (me as { galaxy?: string | null } | null)?.galaxy ?? null;
+    } else {
+      me = planetData as { galaxy?: string | null; credits?: number; resources?: Record<string, number> } | null;
+      galaxy = me?.galaxy ?? null;
+    }
+  }
+
+  if (params.has("market")) {
+    if (!rooms || !galaxy) {
+      return NextResponse.json({ enabled: true, me: me ?? null, orders: [], trades: [] });
+    }
+    const { data: orders, error: ordersError } = await supabase
+      .from("market_orders")
+      .select("id, galaxy, world_id, side, resource, price, quantity, remaining, status, created_at")
+      .eq("galaxy", galaxy)
+      .in("status", ["open", "partial"])
+      .order("price", { ascending: false })
+      .order("created_at", { ascending: true })
+      .limit(200);
+    if (notMigrated(ordersError)) return NextResponse.json({ error: "Galaxy migration not applied: market tables are missing", enabled: false }, { status: 503 });
+    if (ordersError) return NextResponse.json({ error: ordersError.message }, { status: 500 });
+    const { data: trades } = await supabase
+      .from("market_trades")
+      .select("id, resource, price, quantity, buyer_world_id, seller_world_id, created_at")
+      .eq("galaxy", galaxy)
+      .order("created_at", { ascending: false })
+      .limit(30);
+    const { data: prices } = await supabase
+      .from("market_prices")
+      .select("resource, base_price, current_price")
+      .eq("galaxy", galaxy)
+      .order("resource", { ascending: true });
+    const { data: history } = await supabase
+      .from("market_price_history")
+      .select("resource, price, created_at")
+      .eq("galaxy", galaxy)
+      .order("created_at", { ascending: true })
+      .limit(300);
+    return NextResponse.json({ enabled: true, me: me ?? null, orders: orders ?? [], trades: trades ?? [], prices: prices ?? [], history: history ?? [] });
   }
 
   let planets: { world_id: string }[] = [];
@@ -101,6 +139,43 @@ export async function POST(req: Request) {
   }
   const action = String(body.action ?? "");
 
+  if (action === "place_order" || action === "cancel_order") {
+    if (!isUuid(String(body.worldId ?? "")) || !body.ownerToken) {
+      return NextResponse.json({ error: "Missing planet or owner token" }, { status: 400 });
+    }
+    if (action === "place_order") {
+      const side = String(body.side ?? "");
+      const resource = String(body.resource ?? "");
+      const price = Number(body.price);
+      const quantity = Number(body.quantity);
+      if (!["buy", "sell"].includes(side)) return NextResponse.json({ error: "Side must be buy or sell" }, { status: 400 });
+      if (!["food", "wood", "stone", "metal", "gold", "herbs"].includes(resource)) return NextResponse.json({ error: "Unknown resource" }, { status: 400 });
+      if (!Number.isInteger(price) || price < 1 || price > 1000000000) return NextResponse.json({ error: "Invalid price" }, { status: 400 });
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100000) return NextResponse.json({ error: "Invalid quantity" }, { status: 400 });
+      const { data, error } = await supabase.rpc("place_market_order", {
+        p_world_id: body.worldId,
+        p_owner_token: body.ownerToken,
+        p_side: side,
+        p_resource: resource,
+        p_price: price,
+        p_quantity: quantity,
+      });
+      if (notMigrated(error)) return NextResponse.json({ error: "Galaxy migration not applied: order book tables are missing", enabled: false }, { status: 503 });
+      if (error) return galaxyError(error, "place_market_order");
+      return NextResponse.json(data);
+    }
+    const orderId = Number(body.orderId);
+    if (!Number.isInteger(orderId) || orderId < 1) return NextResponse.json({ error: "Invalid order id" }, { status: 400 });
+    const { data, error } = await supabase.rpc("cancel_market_order", {
+      p_world_id: body.worldId,
+      p_owner_token: body.ownerToken,
+      p_order_id: orderId,
+    });
+    if (notMigrated(error)) return NextResponse.json({ error: "Galaxy migration not applied: order book tables are missing", enabled: false }, { status: 503 });
+    if (error) return galaxyError(error, "cancel_market_order");
+    return NextResponse.json(data);
+  }
+
   if (action === "sync") {
     const required = ["worldId", "ownerToken", "ownerName", "planetName", "planetType", "population", "villages", "output", "military", "resources"];
     const missing = required.filter((key) => body[key] === undefined || body[key] === null);
@@ -124,6 +199,54 @@ export async function POST(req: Request) {
     const { data, error } = await supabase.rpc("sync_planet", args);
     if (error) return galaxyError(error, "sync_planet");
     return NextResponse.json({ planet: data });
+  }
+
+  if (action === "random_join") {
+    if (!isUuid(String(body.worldId ?? "")) || !body.ownerToken) {
+      return NextResponse.json({ error: "Missing planet or owner token" }, { status: 400 });
+    }
+
+    await supabase.rpc("galaxy_tidy");
+    const { data: galaxies, error: galaxiesError } = await supabase.from("galaxies").select("code");
+    if (galaxiesError) return galaxyError(galaxiesError, "random_join");
+
+    let chosen: string | null = null;
+    if (galaxies?.length) {
+      const { data: members, error: membersError } = await supabase
+        .from("planets")
+        .select("galaxy")
+        .in("galaxy", galaxies.map((galaxy) => galaxy.code));
+      if (membersError) return galaxyError(membersError, "random_join");
+
+      const counts = new Map<string, number>();
+      for (const member of members ?? []) {
+        if (!member.galaxy) continue;
+        counts.set(member.galaxy, (counts.get(member.galaxy) ?? 0) + 1);
+      }
+      const available = galaxies
+        .map((galaxy) => galaxy.code)
+        .filter((code) => (counts.get(code) ?? 0) < 5);
+      if (available.length) {
+        chosen = available[Math.floor(Math.random() * available.length)];
+      }
+    }
+
+    // When no room exists, generate a fresh five-digit code and create one.
+    if (!chosen) {
+      const existingCodes = new Set((galaxies ?? []).map((galaxy) => galaxy.code));
+      do {
+        chosen = String(10000 + Math.floor(Math.random() * 90000));
+      } while (existingCodes.has(chosen));
+    }
+
+    const { data, error } = await supabase.rpc("join_galaxy", {
+      p_world_id: body.worldId,
+      p_owner_token: body.ownerToken,
+      p_code: chosen,
+    });
+    if (notMigrated(error)) return NextResponse.json({ ok: false, reason: "not_migrated" }, { status: 503 });
+    if (error) return galaxyError(error, "join_galaxy");
+    return NextResponse.json(data);
   }
 
   // Join (or create, if nobody is using the code) a galaxy, or leave the one you're in.

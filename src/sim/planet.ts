@@ -269,6 +269,7 @@ export class PlanetSim {
   // Stockpiled resources: the planet's score, and later what it trades with other planets.
   // Production is scaled by stability, so a peaceful planet out-produces a troubled one.
   resources: Resources = { food: 0, wood: 0, stone: 0, metal: 0, gold: 0, herbs: 0 };
+  marketCredits = 1000;
   upgrades: Record<UpgradeId, number> = { irrigation: 0, forestry: 0, masonry: 0, foundry: 0, temples: 0 };
   output = 0; // the planet's production per year, in value points (see VALUE): the score
   private produced = 0; // value gathered since the last output sample
@@ -2269,6 +2270,12 @@ export class PlanetSim {
     this.resources[r] = Math.max(0, this.resources[r] + amount);
     const home = this.nationHome(0);
     if (amount > 0 && home != null) this.announce("🛸", "A gift from the stars", `${other} sent ${amount} ${r}.`, home);
+  }
+
+  // Apply the server-authoritative market snapshot after a fill or order placement.
+  marketSync(resources: Resources, credits: number) {
+    this.resources = { ...this.resources, ...Object.fromEntries(Object.entries(resources).map(([key, value]) => [key, Math.floor(Number(value) || 0)])) } as Resources;
+    this.marketCredits = Math.max(0, Math.floor(credits));
   }
 
   // Gold carried home by our fleet after a won invasion.
