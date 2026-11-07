@@ -51,7 +51,20 @@ export interface Village {
   residents: number;
   houses: number;
   nation: number;
+  tier: 0 | 1 | 2; // village, town, city
 }
+
+// Settlement names: each nation draws from its own sounds, so its places sound alike.
+const SOUNDS = [
+  { start: ["Kal", "Tor", "Vey", "Mor", "Ash", "Dun", "Ser"], mid: ["a", "e", "o", "i"], end: ["gard", "mar", "veth", "dor", "holm", "rin"] },
+  { start: ["Lu", "Mi", "Sa", "Ne", "Ori", "Ae", "Ti"], mid: ["la", "ri", "na", "ve", "si"], end: ["sa", "lia", "nor", "ne", "wyn", "elle"] },
+  { start: ["Zar", "Qel", "Xan", "Vor", "Ith", "Ul", "Ny"], mid: ["a", "u", "y", "o"], end: ["ith", "esh", "qar", "zun", "oth", "ax"] },
+  { start: ["Bra", "Gro", "Hal", "Fen", "Wyr", "Cal", "Sten"], mid: ["e", "a", "o", ""], end: ["wick", "ford", "stead", "by", "mere", "ton"] },
+  { start: ["Ama", "Ixi", "Tla", "Coa", "Yu", "Pa", "Nah"], mid: ["ca", "to", "li", "hu", "ma"], end: ["tlan", "pec", "co", "lan", "tzin", "pa"] },
+];
+const TIER_NAME = ["village", "town", "city"] as const;
+const TIER_AT = [0, 12, 30]; // residents needed to grow into a town, then a city
+const TIER_HOUSES = [16, 26, 38];
 
 // A nation: one people with its own AI mind, religion, focus and needs.
 // Nations share the planet, so their borders touch and they trade or fight.
@@ -732,10 +745,41 @@ export class PlanetSim {
 
   private foundVillage(face: number, nation: number): Village {
     const count = this.villages.filter((v) => v.nation === nation).length + 1;
-    const v: Village = { id: this.nextId++, face, name: `${this.nationName(nation).replace(/^the /, "")} village ${count}`, residents: 1, houses: 1, nation };
+    const v: Village = { id: this.nextId++, face, name: this.placeName(nation), residents: 1, houses: 1, nation, tier: 0 };
     this.villages.push(v);
-    this.events.push({ kind: "village", detail: `${this.nationName(nation)} founded a new village (${count} now).`, nation });
+    this.events.push({ kind: "village", detail: `${this.nationName(nation)} founded the village of ${v.name} (${count} settlements now).`, nation });
     return v;
+  }
+
+  private usedNames = new Set<string>();
+  private placeName(nation: number) {
+    const sounds = SOUNDS[nation % SOUNDS.length];
+    const pick = (a: readonly string[]) => a[Math.floor(Math.random() * a.length)];
+    for (let i = 0; i < 30; i++) {
+      const name = pick(sounds.start) + (Math.random() < 0.5 ? pick(sounds.mid) : "") + pick(sounds.end);
+      if (!this.usedNames.has(name)) {
+        this.usedNames.add(name);
+        return name;
+      }
+    }
+    return pick(sounds.start) + pick(sounds.end) + " " + (this.usedNames.size + 1);
+  }
+
+  // A nation's capital: its biggest settlement.
+  capital(nation: number) {
+    let best: Village | null = null;
+    for (const v of this.villages) if (v.nation === nation && (!best || v.residents > best.residents)) best = v;
+    return best;
+  }
+
+  // Villages grow into towns and towns into cities as people move in (and never shrink back a tier).
+  private growSettlement(v: Village) {
+    const next = v.tier + 1;
+    if (next > 2 || v.residents < TIER_AT[next]) return;
+    v.tier = next as 1 | 2;
+    const where = this.nationName(v.nation);
+    this.events.push({ kind: "milestone", detail: `${v.name} in ${where} has grown into a ${TIER_NAME[next]}.`, nation: v.nation });
+    this.announce(next === 2 ? "🏙️" : "🏘️", next === 2 ? "A new city!" : "A new town", `${v.name} in ${where} has grown into a ${TIER_NAME[next]}.`, v.face);
   }
 
   private stepVillages(dt: number) {
@@ -746,7 +790,8 @@ export class PlanetSim {
     this.villages = this.villages.filter((v) => {
       v.residents = counts.get(v.id) ?? 0;
       if (v.residents === 0 && v.houses <= 1) return false; // abandoned
-      const target = Math.min(16, Math.ceil(v.residents / 3));
+      this.growSettlement(v);
+      const target = Math.min(TIER_HOUSES[v.tier], Math.ceil(v.residents / 3));
       if (v.houses < target && Math.random() < 0.05) v.houses++;
       else if (v.houses > target && Math.random() < 0.01) v.houses--;
       // Farmland grows with the village: the home tile and rings around it.
@@ -840,7 +885,6 @@ export class PlanetSim {
           v.nation = n;
           this.nations[from].stability -= 10;
           this.events.push({ kind: "captured", detail: `${this.nationName(n)} captured ${v.name} from ${this.nationName(from)}.`, nation: from, other: n });
-          v.name = `${v.name.replace(/ village \d+$/, "")} (taken by ${this.nationName(n)})`;
           break;
         }
       }
@@ -1103,7 +1147,7 @@ export class PlanetSim {
       // Drift: rotate the position about the cloud's own axis, then follow it across tiles.
       v.set(...w.pos).applyAxisAngle(ax.set(...w.axis), w.speed * dt);
       w.pos = [v.x, v.y, v.z];
-      w.face = this.walkTo(w.face, v);
+      w.face = this.faceToward(w.face, v);
       w.rainTimer -= dt;
       if (w.rainTimer <= 0) {
         w.rainTimer = 0.5;
@@ -1129,7 +1173,7 @@ export class PlanetSim {
   }
 
   // Greedy walk across neighbouring tiles towards direction `v` (clouds move a little each frame).
-  private walkTo(f: number, v: THREE.Vector3) {
+  faceToward(f: number, v: THREE.Vector3) {
     for (let i = 0; i < 40; i++) {
       let best = f, bd = this.centroids[f * 3] * v.x + this.centroids[f * 3 + 1] * v.y + this.centroids[f * 3 + 2] * v.z;
       for (let k = 0; k < 3; k++) {
@@ -1282,6 +1326,9 @@ export class PlanetSim {
       policy: nt.policy,
       population: this.people.filter((p) => p.nation === nt.id).length,
       villages: this.villages.filter((v) => v.nation === nt.id).length,
+      cities: this.villages.filter((v) => v.nation === nt.id && v.tier === 2).length,
+      towns: this.villages.filter((v) => v.nation === nt.id && v.tier === 1).length,
+      capital: this.capital(nt.id)?.name,
       needs: this.nationNeeds(nt.id),
       crisis: this.crisis(nt.id),
       relations: this.nations

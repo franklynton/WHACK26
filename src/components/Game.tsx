@@ -253,7 +253,7 @@ export default function Game({ playerName, planetName = "Arda" }: { playerName: 
   const awake = civs.filter(Boolean).length;
   return (
     <main className="relative h-dvh w-full overflow-hidden select-none">
-      <div className="absolute inset-0">
+      <div className="absolute inset-0 isolate">
         <Globe sim={sim} tool="hand" speed={speed} onPaint={() => {}} onHover={hoverAt} focus={focus} />
       </div>
 
