@@ -34,10 +34,10 @@ Open http://localhost:3000, enter your name and create your planet.
    NEXT_PUBLIC_SUPABASE_ANON_KEY=...
    SUPABASE_SERVICE_ROLE_KEY=...
    ```
-3. Run `supabase/migrations/001_galaxy.sql`, then `002_galaxy_fixes.sql`, in the Supabase SQL editor.
+3. Run `supabase/migrations/001_galaxy.sql`, then `002_galaxy_fixes.sql`, then `003_galaxy_rooms.sql`, in the Supabase SQL editor.
 4. Add the same three variables to the Vercel project's environment variables.
 
-Every planet syncs to the galaxy every five seconds. Once your nation reaches the Space Age, the Galaxy button unlocks: send resources to, or invade, any planet that is online. Server-side SQL functions validate tokens, amounts and invasion cooldowns, and the result lands in both games (the other player's planet gets the resources, or loses people and gold).
+Every planet syncs to the galaxy every five seconds. Galaxies are temporary rooms of up to 5 gods, named by a code (set on the landing page, in the Galaxy panel, or with a `/?galaxy=CODE` link). The first god to use a code creates the galaxy, others join until it's full, and anyone can leave at any time. A god who stops syncing for 30 seconds is dropped, and an empty galaxy is deleted, so its code can be used again. Leaving never undoes what trades or invasions did to your planet. Once your nation reaches the Space Age, you can send resources to, or invade, any planet in your galaxy. Server-side SQL functions validate tokens, amounts and invasion cooldowns, and the result lands in both games (the other player's planet gets the resources, or loses people and gold).
 
 ## How we work
 

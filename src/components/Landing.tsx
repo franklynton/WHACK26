@@ -1,10 +1,11 @@
 "use client";
 // The front page: what Arda is, how to play, and a button to create your planet.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Portrait from "./Portrait";
 import RaceStats from "./RaceStats";
 import { RACES, type RaceId } from "@/sim/races";
 import { PLANET_TYPES } from "@/sim/planet";
+import { CODE_RULE, GALAXY_MAX, cleanCode, joinError, setWantedGalaxy, typeCode, wantedGalaxy } from "@/lib/galaxyCode";
 
 const STEPS = [
   { icon: "🌍", title: "Get a planet", text: "Every planet is different. Some are rich in wood, others in metal, gold or rare medicinal herbs." },
@@ -30,15 +31,39 @@ export default function Landing({ onStart }: { onStart: (playerName: string, pla
   const [race, setRace] = useState<RaceId>("human");
   const [world, setWorld] = useState<number | undefined>(undefined); // undefined = random
   const [demo, setDemo] = useState(false); // a speedrun of the real game, for presentations
+  const [code, setCode] = useState(() => wantedGalaxy() ?? ""); // galaxy code; empty is playing alone
+  // What the galaxy with this code looks like right now, checked as you type (null: not checked).
+  const [peek, setPeek] = useState<{ code: string; members: number; exists: boolean } | null>(null);
+  const [codeError, setCodeError] = useState("");
+  useEffect(() => {
+    const c = cleanCode(code);
+    if (!c) return;
+    let live = true;
+    const t = window.setTimeout(async () => {
+      try {
+        const data = await (await fetch(`/api/galaxy?peek=${c}`)).json();
+        if (live && data.rooms && typeof data.members === "number") setPeek({ code: c, members: data.members, exists: data.exists });
+      } catch {}
+    }, 350);
+    return () => {
+      live = false;
+      window.clearTimeout(t);
+    };
+  }, [code]);
+  const checked = peek && peek.code === cleanCode(code) ? peek : null;
+  const full = !!checked && checked.members >= GALAXY_MAX;
 
   const start = (e: React.FormEvent) => {
     e.preventDefault();
+    if (code && !cleanCode(code)) return setCodeError(CODE_RULE);
+    if (full) return setCodeError(joinError("full", checked!.code, checked!.members));
     const n = name.trim() || "Nameless One";
     const pl = planet.trim() || "Arda";
     try {
       localStorage.setItem(NAME_KEY, n);
       localStorage.setItem(PLANET_KEY, pl);
     } catch {}
+    setWantedGalaxy(cleanCode(code)); // the game joins (or creates) it once your planet exists
     onStart(n, pl, race, world, demo);
   };
 
@@ -126,6 +151,29 @@ export default function Landing({ onStart }: { onStart: (playerName: string, pla
             ))}
           </div>
           {demo && <p className="text-xs text-white/55">For presentations. The same game at 4x speed, with faster eras, chattier AI, no game-over screen and a button to skip to space. It saves separately, so your real planet is untouched.</p>}
+          <label htmlFor="galaxy" className="label mt-1">
+            Galaxy code <span className="normal-case text-white/40">(optional)</span>
+          </label>
+          <input
+            id="galaxy"
+            value={code}
+            onChange={(e) => {
+              setCode(typeCode(e.target.value));
+              setCodeError("");
+            }}
+            placeholder="Leave empty to play alone"
+            aria-invalid={!!codeError || full}
+            aria-describedby="galaxy-hint"
+            className={`rounded-lg bg-white/10 px-4 py-2.5 font-mono uppercase outline-none placeholder:font-sans placeholder:normal-case placeholder:text-white/30 focus:bg-white/15 ${codeError || full ? "ring-1 ring-rose-400" : ""}`}
+          />
+          <p id="galaxy-hint" role={codeError || full ? "alert" : undefined} className={`text-xs ${codeError || full ? "text-rose-300" : "text-white/40"}`}>
+            {codeError ||
+              (full && joinError("full", checked!.code, checked!.members)) ||
+              (code && !cleanCode(code) && CODE_RULE) ||
+              (checked && !checked.exists && `New galaxy: you'll create ${checked.code}. Share the code so friends can join.`) ||
+              (checked && `${checked.members}/${GALAXY_MAX} gods are in ${checked.code}. You'll join them.`) ||
+              `Gods with the same code share a galaxy (up to ${GALAXY_MAX}). A new code creates one. You can join or leave any time.`}
+          </p>
           {world != null && (
             <p className="text-xs text-white/55">
               {PLANET_TYPES[world].blurb}. Prone to {PLANET_TYPES[world].hazard}s. Weak to {PLANET_TYPES[world].weakTo}: {PLANET_TYPES[world].weakWhy}.
