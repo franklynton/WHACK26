@@ -4,7 +4,7 @@
 // Left-drag paints with the current power; right-drag (or the Hand tool) rotates.
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { Html, OrbitControls, Stars, Text } from "@react-three/drei";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Component, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as THREE from "three";
 import { D, isWater, PlanetSim, T } from "@/sim/planet";
 import { tileRand } from "@/sim/noise";
@@ -685,6 +685,18 @@ function ContinentLabels({ sim }: { sim: PlanetSim }) {
   );
 }
 
+// The continent labels load their font from a CDN while the game runs. If that fails (venue Wi-Fi,
+// a blocked CDN), the error would otherwise take the whole game down; this shows no labels instead.
+class LabelsOrNothing extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    return this.state.failed ? null : <Suspense fallback={null}>{this.props.children}</Suspense>;
+  }
+}
+
 // Start with the camera looking at where the people are.
 function FaceStart({ sim }: { sim: PlanetSim }) {
   const camera = useThree((s) => s.camera);
@@ -1099,7 +1111,9 @@ export default function Globe({ sim, tool, speed, onPaint, onHover, focus }: { s
       <Houses sim={sim} />
       <Landmarks sim={sim} />
       <Cities sim={sim} />
-      <ContinentLabels sim={sim} />
+      <LabelsOrNothing>
+        <ContinentLabels sim={sim} />
+      </LabelsOrNothing>
       <Trees sim={sim} />
       <Ocean />
       <Clouds />

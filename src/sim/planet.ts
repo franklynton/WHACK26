@@ -205,6 +205,7 @@ export function invasionBonus(attacker: string, defender: string) {
 const VILLAGE_RANGE = 0.2; // radians: how far people roam from home / how close villages can be
 
 // Fields rebuilt from the seed on load, or not worth keeping.
+const RESOURCE_KEYS: (keyof Resources)[] = ["food", "wood", "stone", "metal", "gold", "herbs"];
 const UNSAVED = new Set(["seed", "n", "geometry", "centroids", "neighbours", "vertexId", "cornerCount", "type", "events", "_continents"]);
 const TYPED = { Float32Array, Int16Array, Int32Array, Uint8Array } as const;
 
@@ -270,6 +271,9 @@ export class PlanetSim {
   // Production is scaled by stability, so a peaceful planet out-produces a troubled one.
   resources: Resources = { food: 0, wood: 0, stone: 0, metal: 0, gold: 0, herbs: 0 };
   marketCredits = 1000;
+  // The stockpile the galaxy database last confirmed (null until the first sync). Each sync sends what
+  // changed since then, so produce, spend, trades and market fills all add up (see galaxyAdopt).
+  galaxyBase: Resources | null = null;
   upgrades: Record<UpgradeId, number> = { irrigation: 0, forestry: 0, masonry: 0, foundry: 0, temples: 0 };
   output = 0; // the planet's production per year, in value points (see VALUE): the score
   private produced = 0; // value gathered since the last output sample
@@ -2265,22 +2269,42 @@ export class PlanetSim {
 
   // ---- The galaxy (multiplayer): effects of trades and invasions with other players' planets ----
 
-  // Resources sent to (negative) or received from (positive) another planet.
+  // Resources sent to or received from another planet. The database already moved them, so the
+  // new totals arrive with the next sync; this only tells the player.
   galaxyTrade(r: keyof Resources, amount: number, other: string) {
-    this.resources[r] = Math.max(0, this.resources[r] + amount);
     const home = this.nationHome(0);
     if (amount > 0 && home != null) this.announce("🛸", "A gift from the stars", `${other} sent ${amount} ${r}.`, home);
   }
 
-  // Apply the server-authoritative market snapshot after a fill or order placement.
-  marketSync(resources: Resources, credits: number) {
-    this.resources = { ...this.resources, ...Object.fromEntries(Object.entries(resources).map(([key, value]) => [key, Math.floor(Number(value) || 0)])) } as Resources;
-    this.marketCredits = Math.max(0, Math.floor(credits));
+  // What to send on the next galaxy sync: whole numbers now held, and the change since the last
+  // confirmed totals (null on a planet's first sync, which sends the whole stockpile instead).
+  galaxySnapshot() {
+    const sent = {} as Resources;
+    for (const r of RESOURCE_KEYS) sent[r] = Math.floor(this.resources[r]);
+    const base = this.galaxyBase;
+    let delta: Resources | null = null;
+    if (base) {
+      delta = {} as Resources;
+      for (const r of RESOURCE_KEYS) delta[r] = sent[r] - base[r];
+    }
+    return { sent, delta };
+  }
+
+  // The database's totals after a sync: they include market fills, trade offers and invasion loot
+  // settled there. Anything gained or spent here while the sync was in flight is kept on top.
+  galaxyAdopt(server: Partial<Resources>, sent: Resources, credits?: number) {
+    const base = {} as Resources;
+    for (const r of RESOURCE_KEYS) {
+      base[r] = Math.max(0, Math.floor(Number(server[r]) || 0));
+      this.resources[r] = Math.max(0, base[r] + (this.resources[r] - sent[r]));
+    }
+    this.galaxyBase = base;
+    if (credits != null) this.marketCredits = Math.max(0, Math.floor(credits));
   }
 
   // Gold carried home by our fleet after a won invasion.
+  // The database adds the gold, so it arrives with the next sync; this only tells the player.
   galaxyLoot(amount: number, other: string) {
-    this.resources.gold += amount;
     const home = this.nationHome(0);
     if (home != null) this.announce("⚔️", "Victory among the stars", `Your fleet raided ${other} and brought home ${amount} gold.`, home);
   }
