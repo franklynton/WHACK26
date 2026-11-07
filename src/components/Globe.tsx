@@ -393,10 +393,15 @@ function Houses({ sim }: { sim: PlanetSim }) {
   const ref = useRef<THREE.InstancedMesh>(null);
   const roofs = useRef<THREE.InstancedMesh>(null);
   const roof = useMemo(() => {
-    const g = new THREE.ConeGeometry(0.0085, 0.008, 4);
-    g.rotateY(Math.PI / 4);
+    // A pitched (gable) roof: a triangle extruded along the house, so from above it reads as a roof, not a diamond.
+    const shape = new THREE.Shape([new THREE.Vector2(-0.0068, 0), new THREE.Vector2(0.0068, 0), new THREE.Vector2(0, 0.0065)]);
+    const g = new THREE.ExtrudeGeometry(shape, { depth: 0.0145, bevelEnabled: false });
+    g.translate(0, 0, -0.00725);
     return g;
   }, []);
+  const n = useMemo(() => new THREE.Vector3(), []);
+  const turn = useMemo(() => new THREE.Quaternion(), []);
+  const qh = useMemo(() => new THREE.Quaternion(), []);
   const m = useMemo(() => new THREE.Matrix4(), []);
   const centre = useMemo(() => new THREE.Vector3(), []);
   const p = useMemo(() => new THREE.Vector3(), []);
@@ -414,7 +419,7 @@ function Houses({ sim }: { sim: PlanetSim }) {
     let i = 0;
     for (const v of sim.villages) {
       surface(sim, v.face, centre);
-      const n = p.copy(centre).normalize();
+      n.copy(centre).normalize();
       // Two directions along the ground, to spread houses around the village centre.
       t1.set(0, 1, 0).cross(n);
       if (t1.lengthSq() < 1e-6) t1.set(1, 0, 0);
@@ -426,14 +431,16 @@ function Houses({ sim }: { sim: PlanetSim }) {
         const r = 0.012 * Math.sqrt(k);
         const ang = k * 2.39996 + v.id;
         p.copy(centre).addScaledVector(t1, Math.cos(ang) * r).addScaledVector(t2, Math.sin(ang) * r);
-        p.addScaledVector(n, 0.004);
         s.setScalar(k === 0 ? 1.6 : 1); // the first house is the shrine
-        m.compose(p, q, s);
+        // Each house faces its own way, so the village doesn't look like a grid.
+        qh.copy(q).multiply(turn.setFromAxisAngle(up, ang * 3.7));
+        p.addScaledVector(n, 0.0035 * s.x);
+        m.compose(p, qh, s);
         mesh.setMatrixAt(i, m);
         mesh.setColorAt(i, WALL);
-        // The roof sits on top, in the nation's colour (the shrine's is gold).
-        p.addScaledVector(n, 0.0095 * s.x);
-        m.compose(p, q, s);
+        // The roof sits on top of the walls, in the nation's colour (the shrine's is gold).
+        p.addScaledVector(n, 0.0045 * s.x);
+        m.compose(p, qh, s);
         top.setMatrixAt(i, m);
         top.setColorAt(i, k === 0 ? SHRINE : (cols[v.nation] ?? WHITE));
       }
@@ -448,7 +455,7 @@ function Houses({ sim }: { sim: PlanetSim }) {
   return (
     <>
       <instancedMesh ref={ref} args={[undefined, undefined, MAX_HOUSES]} frustumCulled={false}>
-        <boxGeometry args={[0.009, 0.01, 0.009]} />
+        <boxGeometry args={[0.011, 0.009, 0.013]} />
         <meshStandardMaterial color="#ffffff" roughness={0.8} />
       </instancedMesh>
       <instancedMesh ref={roofs} args={[roof, undefined, MAX_HOUSES]} frustumCulled={false}>
@@ -468,7 +475,15 @@ const MAX_LANDMARKS = 200;
 function Landmarks({ sim }: { sim: PlanetSim }) {
   const bodies = useRef<(THREE.InstancedMesh | null)[]>([]);
   const roofs = useRef<(THREE.InstancedMesh | null)[]>([]);
-  const roofGeo = useMemo(() => LANDMARKS.map((l) => {
+  const roofGeo = useMemo(() => LANDMARKS.map((l, j) => {
+    if (j === 0) {
+      // The hall gets a long pitched roof like the houses.
+      const shape = new THREE.Shape([new THREE.Vector2(-0.0072, -l.roof[1] / 2), new THREE.Vector2(0.0072, -l.roof[1] / 2), new THREE.Vector2(0, l.roof[1] / 2)]);
+      const g = new THREE.ExtrudeGeometry(shape, { depth: 0.018, bevelEnabled: false });
+      g.translate(0, 0, -0.009);
+      g.rotateY(Math.PI / 2);
+      return g;
+    }
     const g = new THREE.ConeGeometry(l.roof[0], l.roof[1], 4);
     g.rotateY(Math.PI / 4);
     return g;
