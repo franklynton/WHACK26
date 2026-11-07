@@ -89,7 +89,10 @@ export interface NationInfo {
   alive: boolean;
   policy: Policy;
   population: number;
-  villages: number;
+  villages: number; // every settlement, including towns and cities
+  cities?: number;
+  towns?: number;
+  capital?: string;
   needs: Needs;
   crisis: Crisis | null;
   relations: { id: number; name?: string; relation: Relation; tension: number }[];

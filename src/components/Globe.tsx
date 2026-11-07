@@ -3,10 +3,10 @@
 // the people as tiny instanced figures and the villages as clusters of houses.
 // Left-drag paints with the current power; right-drag (or the Hand tool) rotates.
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
-import { OrbitControls, Stars } from "@react-three/drei";
-import { useEffect, useMemo, useRef } from "react";
+import { Html, OrbitControls, Stars } from "@react-three/drei";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { D, PlanetSim, T } from "@/sim/planet";
+import { D, isWater, PlanetSim, T } from "@/sim/planet";
 import { tileRand } from "@/sim/noise";
 import type { GodPower } from "@/types/world";
 
@@ -426,11 +426,14 @@ function Houses({ sim }: { sim: PlanetSim }) {
       t1.normalize();
       t2.copy(n).cross(t1);
       q.setFromUnitVectors(up, n);
-      for (let k = 0; k < v.houses && i < MAX_HOUSES; k++, i++) {
+      // Cities pack houses tighter; spots that land in the sea are skipped.
+      const spacing = v.tier === 2 ? 0.0105 : 0.012;
+      for (let k = 0, slot = 0; k < v.houses && i < MAX_HOUSES && slot < v.houses * 2 + 4; slot++) {
         // A golden-angle spiral packs houses evenly.
-        const r = 0.012 * Math.sqrt(k);
-        const ang = k * 2.39996 + v.id;
+        const r = spacing * Math.sqrt(slot);
+        const ang = slot * 2.39996 + v.id;
         p.copy(centre).addScaledVector(t1, Math.cos(ang) * r).addScaledVector(t2, Math.sin(ang) * r);
+        if (slot > 0 && isWater(sim.terrain[sim.faceToward(v.face, p)] as T)) continue;
         s.setScalar(k === 0 ? 1.6 : 1); // the first house is the shrine
         // Each house faces its own way, so the village doesn't look like a grid.
         qh.copy(q).multiply(turn.setFromAxisAngle(up, ang * 3.7));
@@ -443,6 +446,8 @@ function Houses({ sim }: { sim: PlanetSim }) {
         m.compose(p, qh, s);
         top.setMatrixAt(i, m);
         top.setColorAt(i, k === 0 ? SHRINE : (cols[v.nation] ?? WHITE));
+        k++;
+        i++;
       }
     }
     for (const x of [mesh, top]) {
@@ -470,6 +475,7 @@ const LANDMARKS = [
   { at: 5, body: [0.016, 0.011, 0.012], roof: [0.013, 0.008], wall: "#d9c7a8" }, // town hall
   { at: 9, body: [0.012, 0.022, 0.012], roof: [0.011, 0.014], wall: "#f4efe6" }, // temple, gold roof
   { at: 14, body: [0.007, 0.03, 0.007], roof: [0.008, 0.012], wall: "#a59a8c" }, // watchtower
+  { at: 28, body: [0.022, 0.018, 0.022], roof: [0.019, 0.016], wall: "#cfc4b2" }, // castle (only cities get this big)
 ] as const;
 const MAX_LANDMARKS = 200;
 function Landmarks({ sim }: { sim: PlanetSim }) {
@@ -492,7 +498,7 @@ function Landmarks({ sim }: { sim: PlanetSim }) {
   const tmp = useMemo(() => ({ m: new THREE.Matrix4(), c: new THREE.Vector3(), p: new THREE.Vector3(), n: new THREE.Vector3(), t1: new THREE.Vector3(), t2: new THREE.Vector3(), q: new THREE.Quaternion(), one: new THREE.Vector3(1, 1, 1) }), []);
   useFrame(() => {
     const { m, c, p, n, t1, t2, q, one } = tmp;
-    const counts = [0, 0, 0];
+    const counts = LANDMARKS.map(() => 0);
     for (const v of sim.villages) {
       surface(sim, v.face, c);
       n.copy(c).normalize();
@@ -543,6 +549,99 @@ function Landmarks({ sim }: { sim: PlanetSim }) {
   );
 }
 const UP_Y = new THREE.Vector3(0, 1, 0);
+
+// Cities get a ring of stone walls with towers, and towns and cities get name labels (★ marks each nation's capital).
+const WALL_SEGS = 28;
+const MAX_WALLS = 40 * WALL_SEGS;
+function Cities({ sim }: { sim: PlanetSim }) {
+  const walls = useRef<THREE.InstancedMesh>(null);
+  const towers = useRef<THREE.InstancedMesh>(null);
+  const labels = useRef<(HTMLDivElement | null)[]>([]);
+  const camera = useThree((s) => s.camera);
+  const tmp = useMemo(() => ({ m: new THREE.Matrix4(), c: new THREE.Vector3(), p: new THREE.Vector3(), n: new THREE.Vector3(), t1: new THREE.Vector3(), t2: new THREE.Vector3(), q: new THREE.Quaternion(), q2: new THREE.Quaternion(), s: new THREE.Vector3(), cam: new THREE.Vector3() }), []);
+  // Which settlements get a label; refreshed from the frame loop when towns appear, grow or fall.
+  const [towns, setTowns] = useState<{ id: number; face: number; name: string; tier: number; nation: number; capital: boolean }[]>([]);
+  const townKey = useRef("");
+  useFrame(() => {
+    const list = sim.villages.filter((v) => v.tier > 0).map((v) => ({ id: v.id, face: v.face, name: v.name, tier: v.tier, nation: v.nation, capital: sim.capital(v.nation)?.id === v.id }));
+    const key = list.map((v) => `${v.id}:${v.tier}:${v.nation}:${v.capital}`).join(",");
+    if (key !== townKey.current) {
+      townKey.current = key;
+      setTowns(list);
+    }
+  });
+  useFrame(() => {
+    const w = walls.current, tw = towers.current;
+    if (!w || !tw) return;
+    const { m, c, p, n, t1, t2, q, q2, s, cam } = tmp;
+    let i = 0, j = 0;
+    for (const v of sim.villages) {
+      if (v.tier < 2) continue;
+      surface(sim, v.face, c);
+      n.copy(c).normalize();
+      t1.set(0, 1, 0).cross(n);
+      if (t1.lengthSq() < 1e-6) t1.set(1, 0, 0);
+      t1.normalize();
+      t2.copy(n).cross(t1);
+      q.setFromUnitVectors(UP_Y, n);
+      const R = 0.0105 * Math.sqrt(v.houses * 1.4) + 0.016;
+      const seg = (2 * Math.PI * R) / WALL_SEGS;
+      for (let k = 0; k < WALL_SEGS && i < MAX_WALLS; k++) {
+        const a = (k / WALL_SEGS) * Math.PI * 2;
+        p.copy(c).addScaledVector(t1, Math.cos(a) * R).addScaledVector(t2, Math.sin(a) * R);
+        if (isWater(sim.terrain[sim.faceToward(v.face, p)] as T)) continue;
+        // Each segment runs along the circle: x points outwards, y up, z along the wall.
+        s.copy(t1).multiplyScalar(Math.cos(a)).addScaledVector(t2, Math.sin(a));
+        q2.setFromRotationMatrix(m.makeBasis(s, n, s.clone().cross(n)));
+        p.addScaledVector(n, 0.002);
+        m.compose(p, q2, s.set(0.0022, 0.006, seg * 1.05));
+        w.setMatrixAt(i++, m);
+        if (k % 4 === 0) {
+          p.addScaledVector(n, 0.002);
+          m.compose(p, q, s.set(1, 1, 1));
+          tw.setMatrixAt(j++, m);
+        }
+      }
+    }
+    w.count = i;
+    tw.count = j;
+    w.instanceMatrix.needsUpdate = true;
+    tw.instanceMatrix.needsUpdate = true;
+    // Fade labels on the far side of the planet.
+    cam.copy(camera.position).normalize();
+    towns.forEach((v, k) => {
+      const el = labels.current[k];
+      if (!el) return;
+      const d = sim.centroids[v.face * 3] * cam.x + sim.centroids[v.face * 3 + 1] * cam.y + sim.centroids[v.face * 3 + 2] * cam.z;
+      el.style.opacity = String(Math.max(0, Math.min(1, (d - 0.25) * 3)));
+    });
+  });
+  return (
+    <>
+      <instancedMesh ref={walls} args={[undefined, undefined, MAX_WALLS]} frustumCulled={false}>
+        <boxGeometry args={[1, 1, 1]} />
+        <meshStandardMaterial color="#b9ad9b" roughness={0.9} />
+      </instancedMesh>
+      <instancedMesh ref={towers} args={[undefined, undefined, MAX_WALLS / 4]} frustumCulled={false}>
+        <cylinderGeometry args={[0.0028, 0.0032, 0.011, 6]} />
+        <meshStandardMaterial color="#a89c8a" roughness={0.9} flatShading />
+      </instancedMesh>
+      {towns.map((v, k) => {
+        const pos = surface(sim, v.face, new THREE.Vector3()).multiplyScalar(1.035);
+        const capital = v.capital;
+        return (
+          <Html key={v.id} position={pos} center zIndexRange={[10, 0]} style={{ pointerEvents: "none" }}>
+            <div ref={(el) => { labels.current[k] = el; }} className="city-label" style={{ borderColor: sim.nations[v.nation]?.color }}>
+              {capital ? "★ " : ""}
+              {v.name}
+              {v.tier === 2 ? "" : <span className="opacity-60"> · town</span>}
+            </div>
+          </Html>
+        );
+      })}
+    </>
+  );
+}
 
 // Start with the camera looking at where the people are.
 function FaceStart({ sim }: { sim: PlanetSim }) {
@@ -832,6 +931,7 @@ export default function Globe({ sim, tool, speed, onPaint, onHover, focus }: { s
       <People sim={sim} />
       <Houses sim={sim} />
       <Landmarks sim={sim} />
+      <Cities sim={sim} />
       <Trees sim={sim} />
       <Ocean />
       <Clouds />
