@@ -160,7 +160,7 @@ export default function Game({
   const [hud, setHud] = useState<Hud>(() => readHud(sim));
   const [miracle, setMiracle] = useState<MiracleId | null>(null); // picked from the bar; click the land to cast
   const [seenOutcome, setSeenOutcome] = useState(false);
-  const [galaxy, setGalaxy] = useState<"market" | "invade" | "join" | null>(null);
+  const [galaxy, setGalaxy] = useState<"market" | "invade" | "offers" | "join" | null>(null);
   const [upgradesOpen, setUpgradesOpen] = useState(false);
   const resourcesPanelRef = useRef<HTMLDivElement>(null);
   const upgradesMenuRef = useRef<HTMLDivElement>(null);
@@ -1138,7 +1138,7 @@ export default function Game({
         {/* Nation chat is temporarily hidden while the galaxy controls take the spotlight. */}
         <div className="mb-4 border-b border-white/10 pb-4">
           <p className="label mb-2">Galaxy</p>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             <button
               disabled={!link.galaxy || !hud.god.spacefaring}
               onClick={() => setGalaxy("invade")}
@@ -1161,6 +1161,18 @@ export default function Game({
               <span className="mt-1 block text-sm font-semibold">Market</span>
               <span className="block text-[10px] text-current opacity-60">
                 {!link.galaxy ? "Join a galaxy first" : "Trade resources"}
+              </span>
+            </button>
+            <button
+              disabled={!link.galaxy}
+              onClick={() => setGalaxy("offers")}
+              className="group rounded-lg border border-sky-300/15 bg-sky-400/10 px-3 py-3 text-left transition hover:border-sky-300/30 hover:bg-sky-400/20 disabled:cursor-not-allowed disabled:border-white/5 disabled:bg-white/[0.03] disabled:text-white/30"
+              title={!link.galaxy ? "Join a galaxy to trade with other gods" : "Offer a swap to another god"}
+            >
+              <span className="block text-lg">🤝</span>
+              <span className="mt-1 block text-sm font-semibold">Offers</span>
+              <span className="block text-[10px] text-current opacity-60">
+                {!link.galaxy ? "Join a galaxy first" : "Swap with a god"}
               </span>
             </button>
           </div>

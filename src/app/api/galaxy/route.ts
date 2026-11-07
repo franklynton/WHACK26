@@ -60,6 +60,27 @@ export async function GET(req: Request) {
     }
   }
 
+  // Offers to and from this planet: open ones sent to us, and ours from the last two minutes (to show how they ended).
+  if (params.has("offers")) {
+    if (!worldId) return NextResponse.json({ incoming: [], outgoing: [] });
+    const columns = "id, from_world_id, to_world_id, from_name, to_name, give_resource, give_amount, want_resource, want_amount, status, reason, expires_at, resolved_at";
+    const recent = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+    const [incoming, outgoing] = await Promise.all([
+      supabase.from("trade_offers").select(columns).eq("to_world_id", worldId).eq("status", "pending").gt("expires_at", new Date().toISOString()).order("id"),
+      supabase.from("trade_offers").select(columns).eq("from_world_id", worldId).gte("created_at", recent).order("id", { ascending: false }).limit(10),
+    ]);
+    if (notMigrated(incoming.error)) return NextResponse.json({ offers: false, incoming: [], outgoing: [] });
+    if (incoming.error || outgoing.error) return NextResponse.json({ error: (incoming.error ?? outgoing.error)!.message }, { status: 500 });
+    // Seconds left by the server's clock, so a player's own clock being off doesn't matter.
+    const now = Date.now();
+    const left = (o: { expires_at: string }) => Math.max(0, Math.round((Date.parse(o.expires_at) - now) / 1000));
+    return NextResponse.json({
+      offers: true,
+      incoming: (incoming.data ?? []).map((o) => ({ ...o, seconds_left: left(o) })),
+      outgoing: (outgoing.data ?? []).map((o) => ({ ...o, seconds_left: left(o) })),
+    });
+  }
+
   if (params.has("market")) {
     if (!rooms || !galaxy) {
       return NextResponse.json({ enabled: true, me: me ?? null, orders: [], trades: [] });
@@ -196,9 +217,37 @@ export async function POST(req: Request) {
       p_position_x: body.positionX ?? 0.5,
       p_position_y: body.positionY ?? 0.5,
     };
-    const { data, error } = await supabase.rpc("sync_planet", args);
+    // Migration 008: send what changed since the last confirmed totals, and get the true totals back.
+    // `deltas: false` tells the game the database is older and its totals mustn't be adopted.
+    let deltas = true;
+    let { data, error } = await supabase.rpc("sync_planet", { ...args, p_delta: body.delta ?? null });
+    if (notMigrated(error)) {
+      deltas = false;
+      ({ data, error } = await supabase.rpc("sync_planet", args));
+    }
     if (error) return galaxyError(error, "sync_planet");
-    return NextResponse.json({ planet: data });
+    return NextResponse.json({ planet: data, deltas });
+  }
+
+  // Trade offers (migration 009): make one, answer one (accept or decline), or take one back.
+  if (action === "offer" || action === "answer_offer" || action === "cancel_offer") {
+    if (!isUuid(String(body.worldId ?? "")) || !body.ownerToken) {
+      return NextResponse.json({ error: "Missing planet or owner token" }, { status: 400 });
+    }
+    const offerId = Number(body.offerId);
+    const { data, error } =
+      action === "offer"
+        ? await supabase.rpc("make_trade_offer", {
+            p_world_id: body.worldId, p_owner_token: body.ownerToken, p_target_world_id: String(body.targetWorldId ?? ""),
+            p_give_resource: String(body.giveResource ?? ""), p_give_amount: Math.floor(Number(body.giveAmount)) || 0,
+            p_want_resource: String(body.wantResource ?? ""), p_want_amount: Math.floor(Number(body.wantAmount)) || 0,
+          })
+        : action === "answer_offer"
+          ? await supabase.rpc("answer_trade_offer", { p_world_id: body.worldId, p_owner_token: body.ownerToken, p_offer_id: offerId, p_accept: body.accept === true })
+          : await supabase.rpc("cancel_trade_offer", { p_world_id: body.worldId, p_owner_token: body.ownerToken, p_offer_id: offerId });
+    if (notMigrated(error)) return NextResponse.json({ ok: false, reason: "not_migrated" }, { status: 503 });
+    if (error) return galaxyError(error, action);
+    return NextResponse.json(data);
   }
 
   if (action === "random_join") {
