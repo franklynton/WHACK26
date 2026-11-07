@@ -342,12 +342,12 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
           </p>
         </div>
         <div className="grid grid-cols-3 gap-2 text-center">
-          <Stock icon="🌾" label="Food" value={stats.resources.food} />
-          <Stock icon="🪵" label="Wood" value={stats.resources.wood} />
-          <Stock icon="🪨" label="Stone" value={stats.resources.stone} />
-          <Stock icon="⚙️" label="Metal" value={stats.resources.metal} />
-          <Stock icon="🪙" label="Gold" value={stats.resources.gold} />
-          <Stock icon="🌿" label="Herbs (medicine)" value={stats.resources.herbs} />
+          <Stock icon="🌾" label="Food" info="Harvested by well-fed people from the land around their homes. Worth 1 point of Output." value={stats.resources.food} />
+          <Stock icon="🪵" label="Wood" info="Cut from forests, which slowly get cleared around towns. Worth 1 point of Output." value={stats.resources.wood} />
+          <Stock icon="🪨" label="Stone" info="Quarried from rocky mountainsides. Worth 2 points of Output." value={stats.resources.stone} />
+          <Stock icon="⚙️" label="Metal" info="Mined from ore in the mountains. Worth 3 points of Output." value={stats.resources.metal} />
+          <Stock icon="🪙" label="Gold" info="Mined only at gold deposits, the yellow specks on the map. The most valuable: worth 5 points of Output." value={stats.resources.gold} />
+          <Stock icon="🌿" label="Herbs" info="Medicinal plants gathered in forests. A stockpile helps people live longer and resist plague. Worth 3 points of Output." value={stats.resources.herbs} />
         </div>
         {/* Map key for the coloured specks on the globe (see DEPOSIT in Globe.tsx) */}
         <div className="-mt-2 flex justify-between text-[11px] text-white/50">
@@ -578,11 +578,18 @@ function NationCard({ n, civ, all, x, y }: { n: NationInfo; civ: Civ | null; all
   );
 }
 
-function Stock({ icon, label, value }: { icon: string; label: string; value: number }) {
+// One resource tile; hovering shows what it is and where it comes from.
+function Stock({ icon, label, info, value }: { icon: string; label: string; info: string; value: number }) {
   return (
-    <div className="rounded-lg bg-white/5 py-1.5" title={label}>
+    <div className="group relative cursor-help rounded-lg bg-white/5 py-1.5" aria-label={`${label}: ${info}`}>
       <div>{icon}</div>
       <div className="text-sm font-semibold tabular-nums">{value.toLocaleString()}</div>
+      <div className="pointer-events-none absolute left-1/2 top-full z-50 mt-1.5 w-44 -translate-x-1/2 rounded-lg border border-white/15 bg-[#0d1424] px-2.5 py-2 text-left opacity-0 shadow-xl transition-opacity group-hover:opacity-100">
+        <p className="text-xs font-semibold">
+          {icon} {label}
+        </p>
+        <p className="mt-0.5 text-[11px] leading-snug text-white/70">{info}</p>
+      </div>
     </div>
   );
 }
