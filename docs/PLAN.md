@@ -21,10 +21,10 @@ Read `CLAUDE.md` first. It maps every file.
 
 | Track | Owner | Main files | Goal |
 | --- | --- | --- | --- |
-| 1. Nations and war | Frank | `src/sim/planet.ts`, `src/lib/narrator.ts`, `/api/mind` | Several nations per planet, each with its own mind, beliefs and borders, able to trade or fight |
-| 2. Database and multiplayer | _tbc_ | `src/lib/galaxy.ts` (branch `galaxy`), `src/lib/supabase/`, new `/api/planets` | Save planets to Supabase, a shared universe, trade and invasions between planets |
-| 3. Economy and upgrades | _tbc_ | new `src/sim/upgrades.ts`, new `src/components/Upgrades.tsx` | Spend resources on upgrades, and balance the game |
-| 4. AI voice, polish and pitch | _tbc_ | `src/lib/narrator.ts` prompts, `src/components/Globe.tsx` effects, `public/sounds/`, `docs/` | People feel alive, powers look and sound great, and the pitch is ready |
+| 1. Nations and war ([#3](https://github.com/franklynton/WHACK26/issues/3)) | @franklynton | `src/sim/planet.ts`, `src/lib/narrator.ts`, `/api/mind` | Several nations per planet, each with its own mind, beliefs and borders, able to trade or fight |
+| 2. Database and multiplayer ([#4](https://github.com/franklynton/WHACK26/issues/4)) | @shash-v | `src/lib/galaxy.ts` (branch `galaxy`), `src/lib/supabase/`, new `/api/planets` | Save planets to Supabase, a shared universe, trade and invasions between planets |
+| 3. Economy and upgrades ([#5](https://github.com/franklynton/WHACK26/issues/5)) | @linaslabs | new `src/sim/upgrades.ts`, new `src/components/Upgrades.tsx` | Spend resources on upgrades, and balance the game |
+| 4. AI voice, polish and pitch ([#6](https://github.com/franklynton/WHACK26/issues/6)) | @piyushgurnani06 | `src/lib/narrator.ts` prompts, `src/components/Globe.tsx` effects, `public/sounds/`, `docs/` | People feel alive, powers look and sound great, and the pitch is ready |
 
 Tracks 1 and 4 both touch `narrator.ts`. Track 1 owns the data shape (`World`, `Civ`); track 4 owns the prompt wording. Talk before changing the other's part.
 

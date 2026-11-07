@@ -1,13 +1,32 @@
 # Petri
 
-Raise a tiny civilisation on a pocket-sized planet. An LLM narrates how its people react to you, and planets meet in a shared multiplayer galaxy. Built for WHACK26.
+A god game on your own 3D planet, built for WHACK26. Tiny AI-driven people live on it, worship you, talk back, and decide what to do next. Keep them at peace, grow your resources, and trade with (or invade) other gods' planets.
+
+## Team and tracks
+
+| Who | Track | Issue |
+| --- | --- | --- |
+| @franklynton | Nations and war | [#3](https://github.com/franklynton/WHACK26/issues/3) |
+| @shash-v | Database and multiplayer | [#4](https://github.com/franklynton/WHACK26/issues/4) |
+| @linaslabs | Economy and upgrades | [#5](https://github.com/franklynton/WHACK26/issues/5) |
+| @piyushgurnani06 | AI voice, polish and pitch | [#6](https://github.com/franklynton/WHACK26/issues/6) |
+
+**Start here:** read [docs/PLAN.md](docs/PLAN.md) for the full plan and timeline, then your issue's checklist. [CLAUDE.md](CLAUDE.md) maps every file in the code.
+
+Feature freeze is **Sunday 03:30**, and the backup demo video is due by **Sunday 08:00** (UK time).
 
 ## Run it
+
 ```bash
 npm install
-cp .env.example .env.local   # add your OpenRouter key (optional: it works without one, using canned text)
+cp .env.example .env.local   # add your OpenRouter key (optional: without one the people use pre-written lines)
 npm run dev
 ```
-Open http://localhost:3000, pick a power, and click the planet.
 
-See `CLAUDE.md` for the schema, the tracks and who owns what.
+Open http://localhost:3000, enter your name and create your planet.
+
+## How we work
+
+- One branch per track (`nations`, `multiplayer`, `economy`, `polish`), with small PRs into `main`.
+- Run `npm run build` before pushing. Vercel redeploys on every merge to `main` and builds a preview for every PR.
+- Never commit keys.
