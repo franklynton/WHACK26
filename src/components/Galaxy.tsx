@@ -97,7 +97,7 @@ export default function Galaxy({
       const rows = data.planets as PlanetRow[];
       for (const p of rows) names.current.set(p.world_id, p.planet_name);
       // Announce gods who arrive after we do (not the ones already here when we joined).
-      if (seen.current) for (const p of rows) if (!seen.current.has(p.world_id)) sim.galaxyNews("🛸", "A new god appears", `${p.owner_name} and the planet ${p.planet_name} have joined the galaxy.`);
+      if (seen.current) for (const p of rows) if (!seen.current.has(p.world_id)) sim.galaxyNews("🛸", "A new god appears", `${p.owner_name} and the planet ${p.planet_name} have joined the galaxy.`, false);
       seen.current = new Set([...(seen.current ?? []), ...rows.map((p) => p.world_id)]);
       setPlanets(rows);
       setCodes(data.codes !== false);

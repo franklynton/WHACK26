@@ -2253,9 +2253,9 @@ export class PlanetSim {
   }
 
   // Galaxy news with no effect on the sim (a god joins, a fleet is repelled).
-  galaxyNews(icon: string, title: string, text: string) {
+  galaxyNews(icon: string, title: string, text: string, minor = true) {
     const home = this.nationHome(0);
-    if (home != null) this.announce(icon, title, text, home, true);
+    if (home != null) this.announce(icon, title, text, home, minor);
   }
 
   // Another god's fleet raided us: some people die near the home village.

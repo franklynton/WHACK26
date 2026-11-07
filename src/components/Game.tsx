@@ -509,13 +509,15 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
             title={hud.god.spacefaring ? "Travel to other players' planets" : `Locked: your nation must reach the Space Age (now in the ${ERAS[hud.nations[0]?.era ?? 0]})`}
           >
             {hud.god.spacefaring ? "🌌 Galaxy" : "🔒 Galaxy"}
-            {link.enabled && <span className="ml-1.5 text-xs font-normal text-white/60">· {link.online} online</span>}
           </button>
-          {/* Connection light: green when the galaxy is reachable, grey when it's offline */}
+          {/* Connection pill: a green light and the number of other gods online, or grey when the galaxy is offline */}
           <span
-            className={`h-2 w-2 self-center rounded-full ${link.enabled ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]" : "bg-white/20"}`}
+            className={`flex shrink-0 items-center gap-1 self-center whitespace-nowrap rounded-full px-1.5 py-0.5 text-[11px] tabular-nums ${link.enabled ? "bg-emerald-400/15 text-emerald-200" : "bg-white/5 text-white/40"}`}
             title={link.enabled ? `Connected to ${link.galaxy === "PUBLIC" ? "the open galaxy" : `galaxy ${link.galaxy}`}: ${link.online} other ${link.online === 1 ? "god" : "gods"} online` : "Galaxy offline"}
-          />
+          >
+            <span className={`h-1.5 w-1.5 rounded-full ${link.enabled ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]" : "bg-white/30"}`} />
+            {link.enabled ? link.online : "off"}
+          </span>
           <button
             onClick={() => setMuted((m) => !m)}
             className="rounded-lg bg-white/5 px-2.5 py-1 text-sm transition hover:bg-white/10"
