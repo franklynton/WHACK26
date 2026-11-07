@@ -437,7 +437,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
           <Stock icon="🪵" label="Wood" info="Cut from forests, which slowly get cleared around towns. Worth 1 point of Output." value={stats.resources.wood} />
           <Stock align="right" icon="🪨" label="Stone" info="Quarried from rocky mountainsides. Worth 2 points of Output." value={stats.resources.stone} />
           <Stock align="left" icon="⚙️" label="Metal" info="Mined from ore in the mountains. Worth 3 points of Output." value={stats.resources.metal} />
-          <Stock icon="🪙" label="Gold" info="Mined only at gold deposits, the yellow specks on the map. The most valuable: worth 5 points of Output." value={stats.resources.gold} />
+          <Stock icon="💰" label="Gold" info="Mined only at gold deposits, the yellow specks on the map. The most valuable: worth 5 points of Output." value={stats.resources.gold} />
           <Stock align="right" icon="🌿" label="Herbs" info="Medicinal plants gathered in forests. A stockpile helps people live longer and resist plague. Worth 3 points of Output." value={stats.resources.herbs} />
         </div>
         {/* Map key for the coloured specks on the globe (see DEPOSIT in Globe.tsx) */}
