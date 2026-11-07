@@ -1077,8 +1077,10 @@ export class PlanetSim {
   // still give you the same real seconds to answer) and the eras climb faster on top of that.
   pace = 1;
   techBoost = 1;
+  demo = false; // no win/lose screen, so nothing interrupts a pitch
   startDemo() {
-    this.pace = 3;
+    this.demo = true;
+    this.pace = 4;
     this.techBoost = 2;
   }
 
@@ -1283,7 +1285,7 @@ export class PlanetSim {
     return alive.length ? alive.reduce((t, n) => t + this.loveOf(n.id), 0) / alive.length : 50;
   }
   private checkGoal() {
-    if (this.outcome || !this.nations.length || this.year < 20) return;
+    if (this.demo || this.outcome || !this.nations.length || this.year < 20) return;
     const mine = this.nations[0];
     if (!mine.alive) this.outcome = { won: false, title: "Your people have fallen", text: `${cap(mine.name)}, the people you chose, have been wiped out.` };
     else if (this.avgLove() < 15) this.outcome = { won: false, title: "The planet has turned on you", text: "Every nation now believes their god is cruel. They have stopped praying." };
