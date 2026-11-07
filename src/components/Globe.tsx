@@ -94,27 +94,14 @@ function PlanetMesh({ sim, tool, onPaint, onHover }: { sim: PlanetSim; tool: Too
       tile[f * 3 + 1] = c.g;
       tile[f * 3 + 2] = c.b;
     }
-    // 2. Blend colours where tiles meet, so the land shades smoothly instead of a mosaic.
-    const mix = new Float32Array(sim.cornerCount * 4);
-    for (let i = 0; i < pos.count; i++) {
-      const f = Math.floor(i / 3), cc = sim.vertexId[i] * 4;
-      mix[cc] += tile[f * 3];
-      mix[cc + 1] += tile[f * 3 + 1];
-      mix[cc + 2] += tile[f * 3 + 2];
-      mix[cc + 3]++;
-    }
-    // 3. Positions, colours, and smooth normals shared by every tile at a corner.
+    // 2. Positions, colours, and smooth normals shared by every tile at a corner (smooth hills, crisp colours).
     const normal = new Float32Array(sim.cornerCount * 3);
     const a = new THREE.Vector3(), b = new THREE.Vector3(), d = new THREE.Vector3();
     for (let i = 0; i < pos.count; i++) {
       v.fromBufferAttribute(base, i).normalize().multiplyScalar(1 + corner[sim.vertexId[i]]);
       pos.setXYZ(i, v.x, v.y, v.z);
       const f = Math.floor(i / 3);
-      if (sim.fire[f] > 0) col.setXYZ(i, tile[f * 3], tile[f * 3 + 1], tile[f * 3 + 2]);
-      else {
-        const cc = sim.vertexId[i] * 4;
-        col.setXYZ(i, mix[cc] / mix[cc + 3], mix[cc + 1] / mix[cc + 3], mix[cc + 2] / mix[cc + 3]);
-      }
+      col.setXYZ(i, tile[f * 3], tile[f * 3 + 1], tile[f * 3 + 2]); // crisp: one colour per tile
     }
     for (let f = 0; f < sim.n; f++) {
       a.fromBufferAttribute(pos, f * 3);
