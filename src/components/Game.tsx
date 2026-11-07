@@ -13,10 +13,6 @@ import { sound } from "@/lib/sound";
 import { fallbackCiv, fallbackLeader, fallbackReaction, fallbackThought, type LeaderReply } from "@/lib/narrator";
 import type { ChronicleEntry, ChronicleKind, Civ, Crisis, LeaderMessage, MindMessage, NationInfo, Needs, PlanetStats, Policy, Relation, World } from "@/types/world";
 
-const SPEEDS = [
-  { label: "⏸", speed: 0 },
-  { label: "1×", speed: 1 },
-];
 const POLICY_LABEL: Record<Policy, string> = {
   settle: "Settling down",
   expand: "Expanding",
@@ -59,7 +55,6 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
     return s;
   });
   const count = sim.nations.length;
-  const [speed, setSpeed] = useState(1);
   const [muted, setMuted] = useState(() => {
     try {
       return localStorage.getItem("arda-muted") === "1";
@@ -338,7 +333,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
   return (
     <main className="relative h-dvh w-full overflow-hidden select-none">
       <div className="absolute inset-0 isolate">
-        <Globe sim={sim} tool="hand" speed={speed} onPaint={() => {}} onHover={hoverAt} focus={focus} />
+        <Globe sim={sim} tool="hand" speed={1} onPaint={() => {}} onHover={hoverAt} focus={focus} />
       </div>
 
       {/* The planet and its nations */}
@@ -370,12 +365,12 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
           </p>
         </div>
         <div className="grid grid-cols-3 gap-2 text-center">
-          <Stock icon="🌾" label="Food" info="Harvested by well-fed people from the land around their homes. Worth 1 point of Output." value={stats.resources.food} />
+          <Stock align="left" icon="🌾" label="Food" info="Harvested by well-fed people from the land around their homes. Worth 1 point of Output." value={stats.resources.food} />
           <Stock icon="🪵" label="Wood" info="Cut from forests, which slowly get cleared around towns. Worth 1 point of Output." value={stats.resources.wood} />
-          <Stock icon="🪨" label="Stone" info="Quarried from rocky mountainsides. Worth 2 points of Output." value={stats.resources.stone} />
-          <Stock icon="⚙️" label="Metal" info="Mined from ore in the mountains. Worth 3 points of Output." value={stats.resources.metal} />
+          <Stock align="right" icon="🪨" label="Stone" info="Quarried from rocky mountainsides. Worth 2 points of Output." value={stats.resources.stone} />
+          <Stock align="left" icon="⚙️" label="Metal" info="Mined from ore in the mountains. Worth 3 points of Output." value={stats.resources.metal} />
           <Stock icon="🪙" label="Gold" info="Mined only at gold deposits, the yellow specks on the map. The most valuable: worth 5 points of Output." value={stats.resources.gold} />
-          <Stock icon="🌿" label="Herbs" info="Medicinal plants gathered in forests. A stockpile helps people live longer and resist plague. Worth 3 points of Output." value={stats.resources.herbs} />
+          <Stock align="right" icon="🌿" label="Herbs" info="Medicinal plants gathered in forests. A stockpile helps people live longer and resist plague. Worth 3 points of Output." value={stats.resources.herbs} />
         </div>
         {/* Map key for the coloured specks on the globe (see DEPOSIT in Globe.tsx) */}
         <div className="-mt-2 flex justify-between text-[11px] text-white/50">
@@ -433,7 +428,6 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
           >
             {muted ? "🔇" : "🔊"}
           </button>
-          <Segmented options={SPEEDS.map((s) => s.label)} value={SPEEDS.findIndex((s) => s.speed === speed)} onChange={(i) => setSpeed(SPEEDS[i].speed)} title="Speed" />
         </div>
         {!awake && <p className="text-xs text-white/55">Your nations are wandering. When each founds a village it will become aware of you. Your words are your only power: talk them out of fighting.</p>}
       </aside>
@@ -615,12 +609,14 @@ function NationCard({ n, civ, all, x, y }: { n: NationInfo; civ: Civ | null; all
 }
 
 // One resource tile; hovering shows what it is and where it comes from.
-function Stock({ icon, label, info, value }: { icon: string; label: string; info: string; value: number }) {
+// The tooltip lines up with the tile's outer edge in the side columns, so it never runs off the panel.
+const TIP_ALIGN = { left: "left-0", center: "left-1/2 -translate-x-1/2", right: "right-0" };
+function Stock({ icon, label, info, value, align = "center" }: { icon: string; label: string; info: string; value: number; align?: keyof typeof TIP_ALIGN }) {
   return (
     <div className="group relative cursor-help rounded-lg bg-white/5 py-1.5" aria-label={`${label}: ${info}`}>
       <div>{icon}</div>
       <div className="text-sm font-semibold tabular-nums">{value.toLocaleString()}</div>
-      <div className="pointer-events-none absolute left-1/2 top-full z-50 mt-1.5 w-44 -translate-x-1/2 rounded-lg border border-white/15 bg-[#0d1424] px-2.5 py-2 text-left opacity-0 shadow-xl transition-opacity group-hover:opacity-100">
+      <div className={`pointer-events-none absolute top-full z-50 mt-1.5 w-44 ${TIP_ALIGN[align]} rounded-lg border border-white/15 bg-[#0d1424] px-2.5 py-2 text-left opacity-0 shadow-xl transition-opacity group-hover:opacity-100`}>
         <p className="text-xs font-semibold">
           {icon} {label}
         </p>
@@ -653,17 +649,3 @@ function NeedBars({ needs, crisis }: { needs: Needs; crisis: Crisis | null }) {
   );
 }
 
-function Segmented({ options, value, onChange, title }: { options: string[]; value: number; onChange: (i: number) => void; title: string }) {
-  return (
-    <div className="flex flex-col items-center gap-0.5 px-1">
-      <span className="text-[10px] uppercase tracking-wider text-white/40">{title}</span>
-      <div className="flex rounded-lg bg-white/5 p-0.5">
-        {options.map((o, i) => (
-          <button key={o} onClick={() => onChange(i)} className={`rounded-md px-2 py-0.5 text-xs ${i === value ? "bg-sky-300/25" : ""}`}>
-            {o}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
