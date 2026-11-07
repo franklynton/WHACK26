@@ -99,8 +99,22 @@ const FATE_ICONS: Record<GodPower, string> = {
 };
 // A tsunami ring spreading from `face`; a meteor falling towards `face`; an erupting volcano at `face`.
 export type Wave = { id: number; face: number; at: number; r: number };
-// A warship: sails from tile to tile across the sea (`from` -> `face`, `t` along the way).
-export type Ship = { id: number; nation: number; face: number; from: number; t: number; path: number[]; hp: number; cooldown: number; replan: number };
+// A ship sails from tile to tile across the sea (`from` -> `face`, `t` along the way).
+// Warships belong to a nation; merchants carry trade between two nations; pirates (nation -1) belong to no one.
+export type Ship = { id: number; kind: "war" | "merchant" | "pirate"; nation: number; dest?: number; port?: number; face: number; from: number; t: number; path: number[]; hp: number; cooldown: number; replan: number };
+// ---- The god's own powers (see the "God" section of PlanetSim) ----
+export type MiracleId = "bless" | "rain" | "calm" | "smite";
+export const MIRACLES: { id: MiracleId; name: string; icon: string; cost: number; cooldown: number; tool: GodPower; blurb: string }[] = [
+  { id: "bless", name: "Bless harvest", icon: "✨", cost: 30, cooldown: 20, tool: "miracle", blurb: "Fields bloom where you click. The people there love you more." },
+  { id: "rain", name: "Send rain", icon: "🌧️", cost: 20, cooldown: 12, tool: "rain", blurb: "Rain ends droughts and puts out fires." },
+  { id: "calm", name: "Calm", icon: "🕊️", cost: 25, cooldown: 20, tool: "peace", blurb: "Clears storms, fire and drought, and soothes angry nations." },
+  { id: "smite", name: "Smite", icon: "⚡", cost: 35, cooldown: 25, tool: "meteor", blurb: "Lightning strikes where you click. They will fear you, and love you less." },
+];
+export type Prayer = { id: number; nation: number; kind: "rain" | "harvest" | "peace" | "sign"; other?: number; text: string; cost: number; at: number };
+export type Choice = { id: number; kind: "disaster" | "war" | "revolution"; title: string; text: string; face: number; nations: number[]; cost: number; at: number };
+export const GOAL_YEAR = 30; // calendar year the goal is judged at
+const PRAYER_LIFE = 40, CHOICE_LIFE = 15; // seconds before an unanswered prayer or choice lapses
+const DISASTER_ICONS = new Set(["🌊", "☄️", "🌋", "⛈️", "🫨", "☀️", "☠️"]);
 // A drought's heat haze over `face`, for the globe to draw while it lasts.
 export type Drought = { id: number; face: number; at: number; r: number; life: number };
 export type Meteor = { id: number; face: number; at: number; radius: number; fall: number; natural: boolean };
@@ -113,7 +127,8 @@ export type Alert = { icon: string; title: string; text: string; at: number; fac
 export const SECONDS_PER_YEAR = 25;
 export const MIN_NATIONS = 3;
 const NAVY_ERA = 2; // ships from the Iron Age
-const MAX_SHIPS = 6; // per nation
+const MAX_SHIPS = 6; // warships per nation
+const MAX_MERCHANTS = 10, MAX_PIRATES = 3;
 // How much each resource counts towards the planet's output score.
 const VALUE: Resources = { food: 1, wood: 1, stone: 2, metal: 3, gold: 5, herbs: 3 };
 const DISASTER_EVERY = 50; // seconds between natural disasters
@@ -597,6 +612,7 @@ export class PlanetSim {
     this.stepNations(dt);
     this.stepNationLife(dt);
     this.stepNavy(dt);
+    this.stepGod(dt);
     this.stepNeeds(dt);
     this.stepWeather(dt);
     this.stepCatastrophes(dt);
@@ -992,13 +1008,230 @@ export class PlanetSim {
     return this.year / SECONDS_PER_YEAR;
   }
 
-  // ---- Navies: from the Iron Age, coastal towns build warships that patrol, fight enemy fleets and shell enemy coasts ----
+  // ---- God: devotion (the god's currency), each nation's love, miracles, prayers, choices and the goal ----
+
+  devotion = 40;
+  love: number[] = []; // 0..100 per nation; 50 = indifferent
+  ready: Record<MiracleId, number> = { bless: 0, rain: 0, calm: 0, smite: 0 }; // year each miracle can be cast again
+  prayers: Prayer[] = [];
+  choice: Choice | null = null;
+  outcome: { won: boolean; title: string; text: string } | null = null;
+  private nextPrayer = 25;
+
+  loveOf(id: number) {
+    return this.love[id] ?? 50;
+  }
+  private adore(id: number, delta: number) {
+    this.love[id] = Math.max(0, Math.min(100, this.loveOf(id) + delta));
+  }
+  private aware(nt: Nation) {
+    return nt.alive && this.villages.some((v) => v.nation === nt.id);
+  }
+
+  private stepGod(dt: number) {
+    for (const nt of this.nations) {
+      if (!this.aware(nt)) continue;
+      // Worship pays: more from a nation that loves you or is busy worshipping.
+      this.devotion += dt * (0.07 + (nt.policy === "worship" ? 0.15 : 0)) * (0.3 + this.loveOf(nt.id) / 50);
+      // Love slowly fades back towards indifference, and a nation that hates you grows restless.
+      this.adore(nt.id, (50 - this.loveOf(nt.id)) * 0.004 * dt);
+      if (this.loveOf(nt.id) < 15) nt.stability -= 0.3 * dt;
+    }
+    // Prayers: now and then a nation asks for something it needs.
+    this.nextPrayer -= dt;
+    if (this.nextPrayer <= 0) {
+      this.nextPrayer = 30 + Math.random() * 20;
+      const askers = this.nations.filter((nt) => this.aware(nt) && !this.prayers.some((p) => p.nation === nt.id));
+      const nt = askers[Math.floor(Math.random() * askers.length)];
+      if (nt) this.prayers.push(this.makePrayer(nt));
+    }
+    for (const p of this.prayers) if (this.year - p.at > PRAYER_LIFE) {
+      this.adore(p.nation, -8);
+      this.events.push({ kind: "drought", detail: `${cap(this.nationName(p.nation))} prayed to their god and heard nothing. They feel abandoned.`, nation: p.nation });
+    }
+    this.prayers = this.prayers.filter((p) => this.year - p.at <= PRAYER_LIFE && this.nations[p.nation]?.alive);
+    if (this.choice && this.year - this.choice.at > CHOICE_LIFE) this.decide(false);
+    this.checkGoal();
+  }
+
+  private makePrayer(nt: Nation): Prayer {
+    const name = cap(this.nationName(nt.id));
+    const foe = this.nations.find((o) => o.alive && o.id !== nt.id && (this.relation[nt.id][o.id] === "war" || this.relation[nt.id][o.id] === "rival"));
+    const base = { id: this.nextId++, nation: nt.id, at: this.year };
+    if (foe) return { ...base, kind: "peace", other: foe.id, cost: 25, text: `${name} pray for peace with ${this.nationName(foe.id)}.` };
+    if (this.nationFood(nt.id) < 55) return Math.random() < 0.5 ? { ...base, kind: "rain", cost: 15, text: `${name} pray for rain on their fields.` } : { ...base, kind: "harvest", cost: 20, text: `${name} pray for a good harvest.` };
+    return { ...base, kind: "sign", cost: 10, text: `${name} pray for a sign that you are watching.` };
+  }
+
+  answerPrayer(id: number, yes: boolean) {
+    const p = this.prayers.find((x) => x.id === id);
+    if (!p) return false;
+    if (yes && this.devotion < p.cost) return false;
+    this.prayers = this.prayers.filter((x) => x !== p);
+    const name = this.nationName(p.nation);
+    if (!yes) {
+      this.adore(p.nation, -6);
+      this.events.push({ kind: "discord", detail: `Their god refused the prayer of ${name}.`, nation: p.nation });
+      return true;
+    }
+    this.devotion -= p.cost;
+    const home = this.capital(p.nation)?.face ?? this.villages.find((v) => v.nation === p.nation)?.face ?? 0;
+    if (p.kind === "rain") this.rainMiracle(home, 0.14);
+    if (p.kind === "harvest") for (let i = 0; i < 3; i++) this.apply("miracle", home, 0.12);
+    if (p.kind === "peace" && p.other != null) this.makePeace(p.nation, p.other);
+    if (p.kind === "sign") this.nations[p.nation].stability += 8;
+    this.adore(p.nation, 12);
+    this.announce("🙏", "Prayer answered", `You answered ${name}. ${p.kind === "peace" ? "The fighting stops." : p.kind === "sign" ? "They saw your sign and rejoice." : p.kind === "rain" ? "Rain falls on their fields." : "Their fields overflow."}`, home, true);
+    this.events.push({ kind: "miracle", detail: `Their god answered their prayer: ${p.text}`, nation: p.nation });
+    return true;
+  }
+
+  // Cast a miracle where the god clicked. Returns false if it isn't ready or affordable.
+  cast(id: MiracleId, face: number) {
+    const m = MIRACLES.find((x) => x.id === id)!;
+    if (this.devotion < m.cost || this.year < this.ready[id] || this.outcome) return false;
+    this.devotion -= m.cost;
+    this.ready[id] = this.year + m.cooldown;
+    const touched = [...this.nationsIn(this.tilesNear(face, 0.15).map(([f]) => f))];
+    const where = this.where(face);
+    if (id === "bless") {
+      for (let i = 0; i < 3; i++) this.apply("miracle", face, 0.12);
+      for (const n of touched) {
+        this.adore(n, 10);
+        this.nations[n].stability += 5;
+      }
+    } else if (id === "rain") {
+      this.rainMiracle(face, 0.15);
+      for (const n of touched) this.adore(n, 5);
+    } else if (id === "calm") {
+      this.calmAt(face, 0.3);
+      for (const n of touched) {
+        this.adore(n, 5);
+        this.nations[n].stability += 10;
+        for (const o of this.nations) if (o.alive && o.id !== n) this.sway(n, o.id, -10);
+      }
+    } else {
+      // Smite: lightning, fire and fear.
+      for (const [f, w] of this.tilesNear(face, 0.04)) if (Math.random() < 0.7 * w + 0.2) this.ignite(f);
+      const killed = this.killWhere((p) => this.angle(p.face, face) < 0.035);
+      this.addWeather(face, true);
+      const w = this.weather[this.weather.length - 1];
+      if (w) w.flash = { face, at: this.year };
+      for (const n of touched) {
+        this.adore(n, -18);
+        this.nations[n].stability -= 8;
+        this.nations[n].policy = "worship"; // fear makes them pray harder
+      }
+      this.events.push({ kind: "fire", detail: `Their god struck the land near ${where} with lightning${killed ? `, killing ${killed}` : ""}. They are terrified.`, nation: touched[0] });
+    }
+    if (id !== "smite") this.events.push({ kind: m.tool === "peace" ? "peace" : m.tool, detail: `Their god worked a miracle near ${where}: ${m.name.toLowerCase()}. The people saw it.`, nation: touched[0] });
+    this.announce(m.icon, m.name, `${m.name} near ${where}.`, face);
+    this.version++;
+    return true;
+  }
+
+  private rainMiracle(face: number, r: number) {
+    for (let i = 0; i < 3; i++) this.apply("rain", face, r);
+    this.addWeather(face, false);
+    for (const [f] of this.tilesNear(face, r)) {
+      this.parched[f] = 0;
+      if (this.fire[f] > 0) this.fire[f] = 0;
+    }
+  }
+
+  private calmAt(face: number, r: number) {
+    this.weather = this.weather.filter((w) => !w.storm || this.angle(this.nearestTile(w.pos), face) > r);
+    for (const [f] of this.tilesNear(face, r)) {
+      this.parched[f] = 0;
+      if (this.fire[f] > 0) this.fire[f] = 0;
+    }
+    this.version++;
+  }
+
+  private nearestTile(pos: [number, number, number]) {
+    let best = 0, bd = -2;
+    for (let f = 0; f < this.n; f += 7) {
+      const d = this.centroids[f * 3] * pos[0] + this.centroids[f * 3 + 1] * pos[1] + this.centroids[f * 3 + 2] * pos[2];
+      if (d > bd) [best, bd] = [f, d];
+    }
+    return best;
+  }
+
+  private makePeace(a: number, b: number) {
+    this.relation[a][b] = this.relation[b][a] = "peace";
+    this.tension[a][b] = this.tension[b][a] = 30;
+    this.events.push({ kind: "diplomacy", detail: `${this.nationName(a)} and ${this.nationName(b)} made peace, by the will of their god.`, nation: a, other: b });
+  }
+
+  // When something big starts, the god may step in (for devotion) or let fate decide.
+  private offer(kind: Choice["kind"], title: string, text: string, face: number, nations: number[]) {
+    if (this.choice || this.outcome || !nations.length) return;
+    const cost = kind === "war" ? 35 : kind === "revolution" ? 25 : 30;
+    this.choice = { id: this.nextId++, kind, title, text, face, nations, cost, at: this.year };
+  }
+
+  decide(intervene: boolean) {
+    const c = this.choice;
+    if (!c) return false;
+    if (intervene && this.devotion < c.cost) return false;
+    this.choice = null;
+    if (!intervene) {
+      if (c.kind === "disaster") for (const n of c.nations) this.adore(n, -4); // "our god did nothing"
+      return true;
+    }
+    this.devotion -= c.cost;
+    if (c.kind === "disaster") {
+      // Turn the disaster aside: waves fall, meteors burn up, the volcano sleeps, fires die.
+      this.waves = this.waves.filter((w) => this.angle(w.face, c.face) > 0.5);
+      this.meteors = this.meteors.filter((m) => this.angle(m.face, c.face) > 0.3);
+      for (const v of this.volcanoes) if (v.active && this.angle(v.face, c.face) < 0.3) Object.assign(v, { active: false, wakeAt: this.year + 400 });
+      this.calmAt(c.face, 0.3);
+      for (const [f] of this.tilesNear(c.face, 0.2)) this.food[f] = Math.max(this.food[f], 0.6);
+      for (const n of c.nations) {
+        this.adore(n, 10);
+        this.nations[n].stability += 8;
+      }
+    } else if (c.kind === "war" && c.nations.length === 2) {
+      this.makePeace(c.nations[0], c.nations[1]);
+      for (const n of c.nations) this.adore(n, 5);
+    } else {
+      for (const n of c.nations) {
+        this.nations[n].stability += 35;
+        this.adore(n, 8);
+      }
+      this.revolt.delete(c.nations[0]);
+    }
+    this.announce("✨", "You intervened", `${c.title.replace(/!$/, "")}: the god stepped in.`, c.face, true);
+    this.events.push({ kind: "miracle", detail: `Their god intervened: ${c.text}`, nation: c.nations[0] });
+    return true;
+  }
+
+  // The goal: keep your chosen people (the first nation) alive to Year GOAL_YEAR, and be loved.
+  avgLove() {
+    const alive = this.nations.filter((n) => this.aware(n));
+    return alive.length ? alive.reduce((t, n) => t + this.loveOf(n.id), 0) / alive.length : 50;
+  }
+  private checkGoal() {
+    if (this.outcome || !this.nations.length || this.year < 20) return;
+    const mine = this.nations[0];
+    if (!mine.alive) this.outcome = { won: false, title: "Your people have fallen", text: `${cap(mine.name)}, the people you chose, have been wiped out.` };
+    else if (this.avgLove() < 15) this.outcome = { won: false, title: "The planet has turned on you", text: "Every nation now believes their god is cruel. They have stopped praying." };
+    else if (this.calendar >= GOAL_YEAR)
+      this.outcome = this.avgLove() >= 50
+        ? { won: true, title: "A beloved god", text: `You guided ${mine.name} to Year ${GOAL_YEAR}, and the nations love you.` }
+        : { won: false, title: "Survived, but unloved", text: `${cap(mine.name)} reached Year ${GOAL_YEAR}, but the nations do not love their god.` };
+  }
+
+  // ---- The seas: from the Iron Age, coastal towns build warships; trading nations send merchant ships
+  // to each other's ports; pirates prey on merchants and coasts, and every navy hunts them ----
 
   ships: Ship[] = [];
   private navyTimer = 3;
+  private tradeTimer = 8;
+  private pirateTimer = 90;
 
   navySize(id: number) {
-    return this.ships.filter((s) => s.nation === id).length;
+    return this.ships.filter((s) => s.kind === "war" && s.nation === id).length;
   }
 
   // A sea tile next to a settlement, if it is on the coast.
@@ -1007,17 +1240,39 @@ export class PlanetSim {
     for (const [f] of this.tilesNear(face, 0.07)) if (isWater(this.terrain[f] as T) && this.dot(face, f) > bd) [best, bd] = [f, this.dot(face, f)];
     return best;
   }
+  private portOf(nation: number) {
+    const mine = this.villages.filter((v) => v.nation === nation).sort((a, b) => b.tier - a.tier);
+    for (const v of mine.slice(0, 4)) {
+      const h = this.harbour(v.face);
+      if (h >= 0) return h;
+    }
+    return -1;
+  }
 
-  // Plan a route by sea (breadth-first over water tiles): to the nearest enemy fleet or enemy coast
-  // if at war, otherwise a patrol to some reachable stretch of sea.
+  // Would `a` fire on `b`? Warships fight enemies at war and pirates; pirates attack everyone; merchants never fight.
+  private hostile(a: Ship, b: Ship) {
+    if (a.kind === "merchant" || a === b) return false;
+    if (a.kind === "pirate") return b.kind !== "pirate";
+    return b.kind === "pirate" || (b.kind === "war" && this.atWar(a.nation, b.nation));
+  }
+
+  // Plan a route by sea (breadth-first over water tiles) to the nearest thing worth sailing to,
+  // or else a patrol to some reachable stretch of sea. Returns false if a merchant can't reach its port.
   private planRoute(sh: Ship) {
-    const foes = this.ships.filter((o) => this.atWar(o.nation, sh.nation)).map((o) => o.face);
-    const towns = this.villages.filter((v) => this.atWar(v.nation, sh.nation)).map((v) => v.face);
+    let foes: number[], towns: number[];
+    if (sh.kind === "merchant") [foes, towns] = [[sh.port!], []];
+    else if (sh.kind === "pirate") {
+      foes = this.ships.filter((o) => o.kind === "merchant").map((o) => o.face);
+      towns = foes.length ? [] : this.villages.map((v) => v.face);
+    } else {
+      foes = this.ships.filter((o) => this.hostile(sh, o)).map((o) => o.face);
+      towns = this.villages.filter((v) => this.atWar(v.nation, sh.nation)).map((v) => v.face);
+    }
     const parent = new Int32Array(this.n).fill(-2);
     parent[sh.face] = -1;
     const order = [sh.face];
     let found = -1;
-    for (let i = 0; i < order.length && order.length < 9000 && found < 0; i++) {
+    for (let i = 0; i < order.length && order.length < 12000 && found < 0; i++) {
       const f = order[i];
       if (i > 0 && (foes.some((g) => this.angle(g, f) < 0.03) || towns.some((g) => this.angle(g, f) < 0.06))) found = f;
       for (let k = 0; k < 3; k++) {
@@ -1027,15 +1282,25 @@ export class PlanetSim {
         order.push(nb);
       }
     }
-    if (found < 0) found = order[Math.min(order.length - 1, 10 + Math.floor(Math.random() * 60))]; // patrol
+    if (found < 0) {
+      if (sh.kind === "merchant") return false;
+      found = order[Math.min(order.length - 1, 10 + Math.floor(Math.random() * 60))]; // patrol
+    }
     const path: number[] = [];
     for (let f = found; f !== sh.face && f >= 0; f = parent[f]) path.push(f);
     sh.path = path.reverse();
-    sh.replan = foes.length || towns.length ? 8 : 30;
+    sh.replan = sh.kind === "merchant" ? 1e9 : foes.length || towns.length ? 8 : 30;
+    return true;
+  }
+
+  private launch(kind: Ship["kind"], nation: number, at: number, extra: Partial<Ship> = {}) {
+    const sh: Ship = { id: this.nextId++, kind, nation, face: at, from: at, t: 1, path: [], hp: kind === "merchant" ? 2 : 3, cooldown: 0, replan: 0, ...extra };
+    this.ships.push(sh);
+    return sh;
   }
 
   private stepNavy(dt: number) {
-    // Shipyards: every few seconds, each nation that has reached the Iron Age may launch a ship.
+    // Shipyards: every few seconds, each nation that has reached the Iron Age may launch a warship.
     this.navyTimer -= dt;
     if (this.navyTimer <= 0) {
       this.navyTimer = 6;
@@ -1044,11 +1309,10 @@ export class PlanetSim {
         const mine = this.villages.filter((v) => v.nation === nt.id);
         const limit = Math.min(MAX_SHIPS, mine.reduce((t, v) => t + (v.tier === 2 ? 2 : v.tier === 1 ? 1 : 0), 1));
         if (this.navySize(nt.id) >= limit || Math.random() > 0.35) continue;
-        const port = mine.sort((a, b) => b.tier - a.tier).map((v) => this.harbour(v.face)).find((h) => h >= 0);
-        if (port == null) continue;
+        const port = this.portOf(nt.id);
+        if (port < 0) continue;
         const first = this.navySize(nt.id) === 0;
-        const sh: Ship = { id: this.nextId++, nation: nt.id, face: port, from: port, t: 1, path: [], hp: 3, cooldown: 0, replan: 0 };
-        this.ships.push(sh);
+        this.launch("war", nt.id, port);
         if (first) {
           const text = `${cap(nt.name)} launched their first warship. They now have a navy.`;
           this.announce("⚓", "A navy is born", text, port, true);
@@ -1056,37 +1320,106 @@ export class PlanetSim {
         }
       }
     }
+    // Trade: nations at peace (trading partners most of all) with ports on the same sea send merchant ships
+    // to each other; every delivery eases tension, so trade begets more trade.
+    this.tradeTimer -= dt;
+    if (this.tradeTimer <= 0) {
+      this.tradeTimer = 7;
+      const merchants = this.ships.filter((s) => s.kind === "merchant");
+      const pairs: [number, number][] = [];
+      for (const a of this.nations) for (const b of this.nations)
+        if (a.alive && b.alive && a.id !== b.id && eraOf(a.tech) >= 1) {
+          const rel = this.relation[a.id][b.id];
+          if (rel === "trade") pairs.push([a.id, b.id], [a.id, b.id]);
+          else if (rel === "peace") pairs.push([a.id, b.id]);
+        }
+      const pick = pairs[Math.floor(Math.random() * pairs.length)];
+      if (pick && merchants.length < MAX_MERCHANTS && merchants.filter((m) => m.nation === pick[0]).length < 2) {
+        const [from, port] = [this.portOf(pick[0]), this.portOf(pick[1])];
+        if (from >= 0 && port >= 0) {
+          const sh = this.launch("merchant", pick[0], from, { dest: pick[1], port });
+          if (!this.planRoute(sh)) this.ships.pop(); // no sea route between them
+        }
+      }
+    }
+    // Pirates: now and then a pirate ship appears out on the open sea.
+    this.pirateTimer -= dt;
+    if (this.pirateTimer <= 0) {
+      this.pirateTimer = 70 + Math.random() * 50;
+      if (this.ships.filter((s) => s.kind === "pirate").length < MAX_PIRATES && (this.ships.length || this.calendar > 6)) {
+        const sea = [...Array(40)].map(() => Math.floor(Math.random() * this.n)).find((f) => this.terrain[f] === T.Deep);
+        if (sea != null) {
+          this.launch("pirate", -1, sea);
+          this.announce("🏴‍☠️", "Pirates!", `A pirate ship has been sighted near ${this.where(sea)}. Merchants beware.`, sea);
+          this.events.push({ kind: "disaster", detail: "Pirates have been sighted at sea, preying on merchant ships.", nation: this.nearestNation(sea) });
+        }
+      }
+    }
     for (const sh of this.ships) {
-      // Sail along the planned route, one sea tile at a time; replan now and then (enemies move).
+      // Sail along the planned route, one sea tile at a time; replan now and then (targets move).
       sh.replan -= dt;
-      sh.t += dt * 1.6;
+      sh.t += dt * (sh.kind === "merchant" ? 1.3 : 1.6);
       if (sh.t >= 1) {
-        if (!sh.path.length || sh.replan <= 0) this.planRoute(sh);
+        if (!sh.path.length || sh.replan <= 0) {
+          if (sh.kind === "merchant" && !sh.path.length) {
+            this.deliver(sh);
+            continue;
+          }
+          this.planRoute(sh);
+        }
         const next = sh.path.shift();
         sh.from = sh.face;
         sh.t = next == null ? 1 : 0;
         if (next != null) sh.face = next;
       }
-      // Fight: fire on enemy ships in range, or shell an enemy coastal settlement.
+      // Fight: fire on a hostile ship in range, or raid/shell a settlement.
       sh.cooldown -= dt;
-      if (sh.cooldown > 0) continue;
-      const foe = this.ships.find((o) => o.hp > 0 && this.atWar(o.nation, sh.nation) && this.angle(o.face, sh.face) < 0.05);
+      if (sh.cooldown > 0 || sh.kind === "merchant") continue;
+      const foe = this.ships.find((o) => o.hp > 0 && this.hostile(sh, o) && this.angle(o.face, sh.face) < 0.05);
       if (foe) {
         sh.cooldown = 1.5;
         if (Math.random() < 0.5) foe.hp--;
-        if (foe.hp <= 0) this.events.push({ kind: "disaster", detail: `A warship of ${this.nationName(foe.nation)} was sunk by ${this.nationName(sh.nation)}.`, nation: foe.nation, other: sh.nation });
+        if (foe.hp <= 0) this.sunk(foe, sh);
         continue;
       }
-      const town = this.villages.find((v) => this.atWar(v.nation, sh.nation) && this.angle(v.face, sh.face) < 0.07);
+      const town = this.villages.find((v) => (sh.kind === "pirate" || this.atWar(v.nation, sh.nation)) && this.angle(v.face, sh.face) < 0.07);
       if (town) {
         sh.cooldown = 3;
-        const killed = this.killWhere((p) => p.nation === town.nation && this.angle(p.face, town.face) < 0.04 && Math.random() < 0.15);
+        const killed = this.killWhere((p) => p.nation === town.nation && this.angle(p.face, town.face) < 0.04 && Math.random() < 0.12);
         this.nations[town.nation].stability -= 1;
-        if (killed) this.events.push({ kind: "disaster", detail: `Warships of ${this.nationName(sh.nation)} shelled ${town.name}, killing ${killed}.`, nation: town.nation, other: sh.nation });
+        if (sh.kind === "pirate") {
+          this.resources.gold = Math.max(0, this.resources.gold - 3);
+          this.resources.food = Math.max(0, this.resources.food - 10);
+          if (Math.random() < 0.3) this.events.push({ kind: "disaster", detail: `Pirates raided ${town.name}${killed ? `, killing ${killed}` : ""} and carrying off food and gold.`, nation: town.nation });
+        } else if (killed) this.events.push({ kind: "disaster", detail: `Warships of ${this.nationName(sh.nation)} shelled ${town.name}, killing ${killed}.`, nation: town.nation, other: sh.nation });
       }
     }
-    // Sunk ships, and fleets of nations that have fallen, leave the sea.
-    this.ships = this.ships.filter((sh) => sh.hp > 0 && this.nations[sh.nation]?.alive);
+    // Sunk ships, and ships of nations that have fallen, leave the sea.
+    this.ships = this.ships.filter((sh) => sh.hp > 0 && (sh.kind === "pirate" || this.nations[sh.nation]?.alive));
+  }
+
+  // A merchant reaches port: both nations profit and grow closer.
+  private deliver(sh: Ship) {
+    sh.hp = 0;
+    const [a, b] = [sh.nation, sh.dest!];
+    if (!this.nations[b]?.alive) return;
+    this.gain("gold", 4);
+    this.gain("food", 15);
+    this.gain("wood", 10);
+    this.sway(a, b, -4);
+    for (const n of [a, b]) this.nations[n].stability += 2;
+    if (Math.random() < 0.25) this.events.push({ kind: "diplomacy", detail: `A merchant ship from ${this.nationName(a)} reached ${this.nationName(b)}, laden with goods.`, nation: a, other: b });
+  }
+
+  private sunk(foe: Ship, by: Ship) {
+    if (foe.kind === "pirate") {
+      this.events.push({ kind: "milestone", detail: `${cap(this.nationName(by.nation))} sank a pirate ship.`, nation: by.nation });
+      this.gain("gold", 6); // the pirates' hoard
+    } else if (by.kind === "pirate") {
+      const what = foe.kind === "merchant" ? "plundered a merchant ship" : "sank a warship";
+      this.events.push({ kind: "disaster", detail: `Pirates ${what} of ${this.nationName(foe.nation)}.`, nation: foe.nation });
+      if (foe.kind === "merchant") this.resources.gold = Math.max(0, this.resources.gold - 5);
+    } else this.events.push({ kind: "disaster", detail: `A warship of ${this.nationName(foe.nation)} was sunk by ${this.nationName(by.nation)}.`, nation: foe.nation, other: by.nation });
   }
 
   // ---- Continents: every big landmass gets a name (worked out once, from the starting map) ----
@@ -1176,6 +1509,7 @@ export class PlanetSim {
         continue;
       }
       const since = this.revolt.get(nt.id) ?? this.year;
+      if (!this.revolt.has(nt.id)) this.offer("revolution", "Revolution!", `The people of ${nt.name} have risen against their ruler.`, this.capital(nt.id)?.face ?? 0, [nt.id]);
       this.revolt.set(nt.id, since);
       if (this.year - since < 15 || Math.random() > 0.15) continue;
       const old = `${nt.leader.title} ${nt.leader.name}`;
@@ -1356,6 +1690,7 @@ export class PlanetSim {
             war: `${A.name} and ${B.name} have gone to war!`,
           };
           this.events.push({ kind: "diplomacy", detail: words[next], nation: a, other: b });
+          if (next === "war") this.offer("war", "War!", words[next], this.capital(a)?.face ?? 0, [a, b]);
         }
       }
     }
@@ -1459,6 +1794,7 @@ export class PlanetSim {
   private announce(icon: string, title: string, text: string, face: number, minor = false) {
     if (minor && this.alert && this.year - this.alert.at < MINOR_ALERT_GAP) return;
     this.alert = { icon, title, text, at: this.year, face };
+    if (!minor && DISASTER_ICONS.has(icon)) this.offer("disaster", title, text, face, [...this.nationsIn(this.tilesNear(face, 0.2).map(([f]) => f))]);
   }
 
   private where(face: number) {
@@ -1807,6 +2143,7 @@ export class PlanetSim {
       race: nt.race,
       tech: Math.round(nt.tech),
       ships: this.navySize(nt.id),
+      love: Math.round(this.loveOf(nt.id)),
       era: eraOf(nt.tech),
       leader: nt.leader,
       needs: this.nationNeeds(nt.id),

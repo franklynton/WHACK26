@@ -1016,7 +1016,8 @@ function Droughts({ sim }: { sim: PlanetSim }) {
   );
 }
 
-// Warships: a dark hull and a sail in the nation's colour, sailing between sea tiles.
+// Ships: warships have a dark hull and a sail in their nation's colour; merchants a light hull and a
+// white sail; pirates are black from bow to sail.
 const MAX_SHIPS_DRAWN = 80;
 function Ships({ sim }: { sim: PlanetSim }) {
   const hulls = useRef<THREE.InstancedMesh>(null);
@@ -1042,18 +1043,20 @@ function Ships({ sim }: { sim: PlanetSim }) {
       h.setMatrixAt(i, m.compose(p, q, s.set(1, 1, 1)));
       sail.compose(p.addScaledVector(up, 0.012), q, s.set(1, 1, 1));
       sl.setMatrixAt(i, sail);
-      sl.setColorAt(i, c.set(sim.nations[sh.nation]?.color ?? "#ffffff"));
+      sl.setColorAt(i, c.set(sh.kind === "pirate" ? "#151515" : sh.kind === "merchant" ? "#f4efe2" : (sim.nations[sh.nation]?.color ?? "#ffffff")));
+      h.setColorAt(i, c.set(sh.kind === "pirate" ? "#0d0d0d" : sh.kind === "merchant" ? "#c79a5d" : "#4a3426"));
     });
     h.count = sl.count = ships.length;
     h.instanceMatrix.needsUpdate = true;
     sl.instanceMatrix.needsUpdate = true;
     if (sl.instanceColor) sl.instanceColor.needsUpdate = true;
+    if (h.instanceColor) h.instanceColor.needsUpdate = true;
   });
   return (
     <>
       <instancedMesh ref={hulls} args={[undefined, undefined, MAX_SHIPS_DRAWN]} frustumCulled={false}>
         <boxGeometry args={[0.012, 0.006, 0.032]} />
-        <meshStandardMaterial color="#4a3426" roughness={0.9} />
+        <meshStandardMaterial roughness={0.9} />
       </instancedMesh>
       <instancedMesh ref={sails} args={[undefined, undefined, MAX_SHIPS_DRAWN]} frustumCulled={false}>
         <boxGeometry args={[0.02, 0.018, 0.0015]} />
