@@ -8,7 +8,7 @@ import Globe from "./Globe";
 import LeaderDialog from "./LeaderDialog";
 import Portrait, { type Mood } from "./Portrait";
 import { ERAS, RACE, type RaceId } from "@/sim/races";
-import { GOAL_YEAR, MIRACLES, PLANET_TYPES, PlanetSim, SECONDS_PER_YEAR, type MiracleId, type SimEvent } from "@/sim/planet";
+import { CHOICE_LIFE, GOAL_YEAR, MIRACLES, PRAYER_LIFE, PLANET_TYPES, PlanetSim, SECONDS_PER_YEAR, type MiracleId, type SimEvent } from "@/sim/planet";
 import { sound } from "@/lib/sound";
 import { fallbackCiv, fallbackLeader, fallbackReaction, fallbackThought, type LeaderReply } from "@/lib/narrator";
 import type { ChronicleEntry, ChronicleKind, Civ, Crisis, LeaderMessage, MindMessage, NationInfo, Needs, PlanetStats, Policy, Relation, World } from "@/types/world";
@@ -483,6 +483,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
         {hud.god.choice && (
           <ChoiceCard
             choice={hud.god.choice}
+            left={CHOICE_LIFE - (hud.year - hud.god.choice.at)}
             devotion={hud.god.devotion}
             names={hud.nations}
             onPick={(yes) => {
@@ -493,9 +494,10 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
           />
         )}
         {hud.god.prayers.slice(-3).map((p) => (
-          <div key={p.id} className="glass pointer-events-auto flex w-[30rem] max-w-full items-center gap-3 px-4 py-2.5 text-sm">
+          <div key={p.id} className="glass pointer-events-auto relative flex w-[30rem] max-w-full items-center gap-3 overflow-hidden px-4 py-2.5 text-sm">
             <span className="text-xl">🙏</span>
             <span className="flex-1">{cap(p.text)}</span>
+            <Countdown left={PRAYER_LIFE - (hud.year - p.at)} life={PRAYER_LIFE} />
             <button
               disabled={hud.god.devotion < p.cost}
               onClick={() => {
@@ -780,17 +782,33 @@ function Goal({ hud }: { hud: Hud }) {
 }
 
 // A disaster, war or revolution has begun: step in (for devotion) or let fate decide.
-function ChoiceCard({ choice, devotion, names, onPick, onShow }: { choice: NonNullable<Hud["god"]["choice"]>; devotion: number; names: NationInfo[]; onPick: (intervene: boolean) => void; onShow: () => void }) {
+// Seconds left to answer, as a number plus a bar along the card's bottom edge that drains and turns red near the end.
+function Countdown({ left, life }: { left: number; life: number }) {
+  const s = Math.max(0, Math.ceil(left)), urgent = s <= 5;
+  return (
+    <>
+      <span className={`w-8 text-right text-xs tabular-nums ${urgent ? "font-bold text-red-400" : "text-white/50"}`} title="Seconds left to decide">
+        {s}s
+      </span>
+      <span className="absolute inset-x-0 bottom-0 h-0.5 bg-white/5">
+        <span className={`block h-full transition-[width] duration-300 ease-linear ${urgent ? "bg-red-400" : "bg-amber-300/70"}`} style={{ width: `${Math.max(0, Math.min(1, left / life)) * 100}%` }} />
+      </span>
+    </>
+  );
+}
+
+function ChoiceCard({ choice, left, devotion, names, onPick, onShow }: { choice: NonNullable<Hud["god"]["choice"]>; left: number; devotion: number; names: NationInfo[]; onPick: (intervene: boolean) => void; onShow: () => void }) {
   const what = { disaster: "Turn it aside", war: "Force a peace", revolution: "Calm the people" }[choice.kind];
   const who = choice.nations.map((n) => names[n]?.name).filter(Boolean).map((n) => cap(n!)).join(" and ");
   return (
-    <div className="glass alert-pop pointer-events-auto w-[30rem] max-w-full px-4 py-3">
+    <div className="glass alert-pop pointer-events-auto relative w-[30rem] max-w-full overflow-hidden px-4 py-3">
       <div className="flex items-center gap-2">
         <span className="text-base font-bold">{choice.title}</span>
         <span className="text-xs text-white/50">{who}</span>
         <button onClick={onShow} className="ml-auto text-xs text-sky-300 hover:underline">
           Show me
         </button>
+        <Countdown left={left} life={CHOICE_LIFE} />
       </div>
       <p className="mt-0.5 text-sm text-white/75">{choice.text}</p>
       <div className="mt-2 flex gap-2">
