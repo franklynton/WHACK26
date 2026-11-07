@@ -9,13 +9,8 @@ import Upgrades, { affordableCount } from "./Upgrades";
 import { UPGRADES, type UpgradeId } from "@/sim/upgrades";
 import { PlanetSim, type SimEvent } from "@/sim/planet";
 import { fallbackCiv, fallbackReaction, fallbackThought } from "@/lib/narrator";
-import type { ChronicleEntry, ChronicleKind, Civ, Crisis, GodPower, MindMessage, NationInfo, Needs, PlanetStats, Policy, Relation, World } from "@/types/world";
+import type { ChronicleEntry, ChronicleKind, Civ, Crisis, MindMessage, NationInfo, Needs, PlanetStats, Policy, Relation, World } from "@/types/world";
 
-// The player has no powers: fate uses them at random (see PlanetSim.maybeFate).
-const FATE_ICON: Record<GodPower, string> = {
-  spawn: "🧍", raise: "⛰️", lower: "🌊", forest: "🌲", rain: "🌧️", drought: "☀️",
-  miracle: "✨", peace: "🕊️", discord: "😈", fire: "🔥", meteor: "☄️",
-};
 const SPEEDS = [
   { label: "⏸", speed: 0 },
   { label: "1×", speed: 1 },
@@ -48,12 +43,13 @@ interface Hud {
   needs: Needs;
   nations: NationInfo[];
   fate: PlanetSim["fate"];
+  alert: PlanetSim["alert"];
   output: number;
   military: number;
   levels: PlanetSim["levels"];
 }
 
-export default function Game({ playerName }: { playerName: string }) {
+export default function Game({ playerName, planetName = "Arda" }: { playerName: string; planetName?: string }) {
   const [sim] = useState(() => {
     const s = new PlanetSim();
     s.seedNations(); // 2 to 5 nations, far apart
@@ -267,7 +263,8 @@ export default function Game({ playerName }: { playerName: string }) {
           <p className="label">
             Year {Math.floor(hud.year)} · God: {playerName}
           </p>
-          <p className="text-2xl font-semibold">{sim.type.name}</p>
+          <p className="truncate text-2xl font-semibold" title={planetName}>{planetName}</p>
+          <p className="text-xs text-white/55">{sim.type.name} world</p>
           <div className="my-2 flex gap-2">
             <div className="flex-1 rounded-lg bg-sky-400/15 px-2.5 py-1.5" title="Resources produced per year, weighted by value. Peace, trade and upgrades raise it.">
               <p className="text-[10px] uppercase tracking-wider text-sky-200/70">Output / yr</p>
@@ -339,14 +336,24 @@ export default function Game({ playerName }: { playerName: string }) {
         {!awake && <p className="text-xs text-white/55">Your nations are wandering. When each founds a village it will become aware of you. Your words are your only power: talk them out of fighting.</p>}
       </aside>
 
+      {/* Pop-up: what is happening on the planet right now (disasters, weather, fate) */}
+      {hud.alert && hud.year - hud.alert.at < 7 && (
+        <div className="pointer-events-none absolute top-4 left-[17.5rem] right-[19.5rem] flex justify-center">
+          <div key={hud.alert.at} className="glass alert-pop pointer-events-auto flex max-w-lg items-center gap-3 px-5 py-3">
+            <span className="text-3xl leading-none">{hud.alert.icon}</span>
+            <div className="min-w-0">
+              <div className="text-base font-bold">{hud.alert.title}</div>
+              <div className="text-sm text-white/75">{hud.alert.text}</div>
+            </div>
+            <button onClick={() => setFocus({ face: hud.alert!.face, key: Date.now() })} className="ml-2 shrink-0 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold transition hover:bg-white/20">
+              Show me
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Fate: the latest thing the heavens did, and the controls hint */}
       <div className="pointer-events-none absolute bottom-4 left-[17.5rem] right-[19.5rem] flex flex-col items-center gap-2">
-        {hud.fate && hud.year - hud.fate.at < 12 && (
-          <div key={hud.fate.at} className="glass flex items-center gap-2 px-4 py-2 text-sm">
-            <span className="text-xl leading-none">{FATE_ICON[hud.fate.power]}</span>
-            {cap(hud.fate.text)}
-          </div>
-        )}
         {shop && <Upgrades resources={stats.resources} levels={hud.levels} onBuy={buy} onBarter={(f, t, n) => sim.barter(f, t, n) && setHud(readHud(sim))} />}
         <button onClick={() => setShop((x) => !x)} className="glass pointer-events-auto px-4 py-2 text-sm font-semibold transition hover:bg-white/10">
           ⬆️ Upgrades
@@ -428,7 +435,7 @@ export default function Game({ playerName }: { playerName: string }) {
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
 
 function readHud(sim: PlanetSim): Hud {
-  return { year: sim.year, stats: sim.stats(), needs: sim.needs(), nations: sim.nationInfo(), fate: sim.fate, output: Math.round(sim.output), military: sim.military(), levels: { ...sim.levels } };
+  return { year: sim.year, stats: sim.stats(), needs: sim.needs(), nations: sim.nationInfo(), fate: sim.fate, alert: sim.alert, output: Math.round(sim.output), military: sim.military(), levels: { ...sim.levels } };
 }
 
 // Calls an LLM route. If the server can't be reached (for example the static demo build,

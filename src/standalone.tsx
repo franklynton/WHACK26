@@ -7,8 +7,8 @@ import Game from "@/components/Game";
 import Landing from "@/components/Landing";
 
 function App() {
-  const [player, setPlayer] = useState<string | null>(null);
-  return player ? <Game playerName={player} /> : <Landing onStart={setPlayer} />;
+  const [player, setPlayer] = useState<{ name: string; planet: string } | null>(null);
+  return player ? <Game playerName={player.name} planetName={player.planet} /> : <Landing onStart={(name, planet) => setPlayer({ name, planet })} />;
 }
 
 createRoot(document.getElementById("root")!).render(<App />);

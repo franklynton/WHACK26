@@ -10,25 +10,29 @@ const STEPS = [
 ];
 
 const NAME_KEY = "arda-player-name";
+const PLANET_KEY = "arda-planet-name";
 
-function savedName() {
+function saved(key: string) {
   try {
-    return localStorage.getItem(NAME_KEY) ?? "";
+    return localStorage.getItem(key) ?? "";
   } catch {
     return "";
   }
 }
 
-export default function Landing({ onStart }: { onStart: (playerName: string) => void }) {
-  const [name, setName] = useState(savedName);
+export default function Landing({ onStart }: { onStart: (playerName: string, planetName: string) => void }) {
+  const [name, setName] = useState(() => saved(NAME_KEY));
+  const [planet, setPlanet] = useState(() => saved(PLANET_KEY));
 
   const start = (e: React.FormEvent) => {
     e.preventDefault();
     const n = name.trim() || "Nameless One";
+    const pl = planet.trim() || "Arda";
     try {
       localStorage.setItem(NAME_KEY, n);
+      localStorage.setItem(PLANET_KEY, pl);
     } catch {}
-    onStart(n);
+    onStart(n, pl);
   };
 
   return (
@@ -53,6 +57,17 @@ export default function Landing({ onStart }: { onStart: (playerName: string) => 
             onChange={(e) => setName(e.target.value)}
             maxLength={24}
             placeholder="What do mortals call you?"
+            className="rounded-lg bg-white/10 px-4 py-2.5 outline-none placeholder:text-white/30 focus:bg-white/15"
+          />
+          <label htmlFor="planet" className="label mt-1">
+            Your planet
+          </label>
+          <input
+            id="planet"
+            value={planet}
+            onChange={(e) => setPlanet(e.target.value)}
+            maxLength={24}
+            placeholder="Name your world"
             className="rounded-lg bg-white/10 px-4 py-2.5 outline-none placeholder:text-white/30 focus:bg-white/15"
           />
           <button className="mt-1 rounded-lg bg-sky-400 px-4 py-2.5 font-semibold text-slate-950 transition hover:bg-sky-300">Create your planet</button>
