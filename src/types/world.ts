@@ -1,6 +1,8 @@
 // The shared world-state schema. Every track reads and writes this shape, so change
 // it together (and tell the team) rather than adding private copies of fields.
 
+import type { Leader, RaceId } from "@/sim/races";
+
 // The planet itself is simulated in src/sim/planet.ts (typed arrays, ~27k tiles).
 // This file holds the summaries that the UI, the API routes and the LLM share.
 
@@ -93,6 +95,10 @@ export interface NationInfo {
   cities?: number;
   towns?: number;
   capital?: string;
+  race: RaceId; // see src/sim/races.ts
+  tech: number; // progress towards space
+  era: number; // index into ERAS (0 = Stone Age, 4 = Space Age)
+  leader: Leader;
   needs: Needs;
   crisis: Crisis | null;
   relations: { id: number; name?: string; relation: Relation; tension: number }[];
@@ -108,7 +114,10 @@ export interface World {
   policy: Policy;
   civ: Civ | null;
   chronicle: ChronicleEntry[]; // newest last
-  nation?: { id: number; name: string; population: number; villages: number; relations: { name: string; relation: Relation; tension: number }[] }; // the nation whose mind is speaking
+  nation?: {
+    id: number; name: string; population: number; villages: number; relations: { name: string; relation: Relation; tension: number }[];
+    race?: RaceId; era?: number; leader?: Leader; // who they are, so the AI speaks in their race's voice
+  }; // the nation whose mind is speaking
 }
 
 // ---- Multiplayer galaxy (Supabase Realtime) ----
@@ -129,4 +138,10 @@ export interface ContactTurn {
   speaker: string; // civ name
   text: string; // what they said (may include invented words)
   intent: "greet" | "trade" | "threaten" | "misunderstand" | "ally" | "war";
+}
+
+// One line of a conversation between the god and a nation's leader (the leader dialogue).
+export interface LeaderMessage {
+  from: "god" | "leader";
+  text: string;
 }

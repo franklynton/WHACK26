@@ -16,6 +16,9 @@ Optimise for a working, impressive live demo over completeness.
 ## How it fits together
 - `src/sim/planet.ts`: `PlanetSim`, the whole simulation. ~27k triangular tiles in typed arrays (elevation, moisture, forest, food, fire, deposits), people, villages, god powers (`apply`), random disasters, needs, resources, planet types. Mutated in place for speed.
 - Nations (`seedNations`, 2-5 per planet): each has its own policy, needs, borders (`owner`) and relations (peace, trade, rival, war) driven by `tension`. Crowded villages send pioneers to found new ones. The Peace and Discord powers and each mind's `toward` stance move tension.
+- Races (`src/sim/races.ts`): each nation is a race (human, goblin, elf, dwarf, lizardfolk) with multipliers on births, appetite, war, speed, lifespan, faith, stability, gathering and tech speed, plus a voice for the AI. The god picks their own race on the landing page; other nations get other races. Nations climb eras (Stone Age to Space Age) via `tech`; goblins are ~10x slower than humans.
+- Planet types also have a `hazard` (the disaster they suffer most) and `weakTo` (the planet type that beats them in invasions; `invasionBonus` for multiplayer).
+- Leaders: every nation has a `leader` (name, title, portrait seed). `LeaderDialog.tsx` + `/api/leader` hold an audience with them in their race's voice; their answer can change the nation's focus or its stance to a neighbour. `Portrait.tsx` draws them as SVG.
 - `src/components/Globe.tsx`: renders the sim (tiles as one mesh, people and houses as instanced meshes) and turns mouse drags into god powers. It also steps the sim every frame.
 - `src/components/Game.tsx`: the HUD. Polls the sim ~3x a second, queues sim events for narration (per nation), and runs one LLM call at a time. Each nation has its own civ, chat and mind; minds take turns to think.
 - `src/types/world.ts`: shared types. `World` is the snapshot sent to the LLM.

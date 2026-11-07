@@ -1,6 +1,9 @@
 "use client";
 // The front page: what Arda is, how to play, and a button to create your planet.
 import { useState } from "react";
+import Portrait from "./Portrait";
+import { RACES, type RaceId } from "@/sim/races";
+import { PLANET_TYPES } from "@/sim/planet";
 
 const STEPS = [
   { icon: "🌍", title: "Get a planet", text: "Every planet is different. Some are rich in wood, others in metal, gold or rare medicinal herbs." },
@@ -20,9 +23,11 @@ function saved(key: string) {
   }
 }
 
-export default function Landing({ onStart }: { onStart: (playerName: string, planetName: string) => void }) {
+export default function Landing({ onStart }: { onStart: (playerName: string, planetName: string, race: RaceId, worldType: number | undefined) => void }) {
   const [name, setName] = useState(() => saved(NAME_KEY));
   const [planet, setPlanet] = useState(() => saved(PLANET_KEY));
+  const [race, setRace] = useState<RaceId>("human");
+  const [world, setWorld] = useState<number | undefined>(undefined); // undefined = random
 
   const start = (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,7 +37,7 @@ export default function Landing({ onStart }: { onStart: (playerName: string, pla
       localStorage.setItem(NAME_KEY, n);
       localStorage.setItem(PLANET_KEY, pl);
     } catch {}
-    onStart(n, pl);
+    onStart(n, pl, race, world);
   };
 
   return (
@@ -70,6 +75,48 @@ export default function Landing({ onStart }: { onStart: (playerName: string, pla
             placeholder="Name your world"
             className="rounded-lg bg-white/10 px-4 py-2.5 outline-none placeholder:text-white/30 focus:bg-white/15"
           />
+          <p className="label mt-1">Your people</p>
+          <div className="grid grid-cols-5 gap-1.5">
+            {RACES.map((r, i) => (
+              <button
+                type="button"
+                key={r.id}
+                onClick={() => setRace(r.id)}
+                className={`flex flex-col items-center rounded-lg p-1 text-xs transition ${race === r.id ? "bg-sky-400/25 ring-1 ring-sky-300" : "bg-white/5 hover:bg-white/10"}`}
+              >
+                <Portrait race={r.id} seed={i * 97 + 5} color="#5fd4ff" size={56} />
+                <span className="mt-0.5 font-medium">{r.name}</span>
+              </button>
+            ))}
+          </div>
+          {RACES.filter((r) => r.id === race).map((r) => (
+            <div key={r.id} className="rounded-lg bg-white/5 p-3 text-xs">
+              <p className="mb-1.5 text-sm text-white/80">{r.blurb}</p>
+              <div className="grid grid-cols-2 gap-x-3">
+                <div>{r.pros.map((p) => <p key={p} className="text-emerald-300">+ {p}</p>)}</div>
+                <div>{r.cons.map((c) => <p key={c} className="text-rose-300">− {c}</p>)}</div>
+              </div>
+              <p className="mt-1.5 text-white/45">Thrives on {r.home} worlds. The other nations on your planet will be other races.</p>
+            </div>
+          ))}
+          <p className="label mt-1">Your world</p>
+          <div className="flex flex-wrap gap-1.5">
+            {[undefined, ...PLANET_TYPES.map((_, i) => i)].map((i) => (
+              <button
+                type="button"
+                key={i ?? "random"}
+                onClick={() => setWorld(i)}
+                className={`rounded-lg px-2.5 py-1 text-xs transition ${world === i ? "bg-sky-400/25 ring-1 ring-sky-300" : "bg-white/5 hover:bg-white/10"}`}
+              >
+                {i == null ? "🎲 Random" : PLANET_TYPES[i].name}
+              </button>
+            ))}
+          </div>
+          {world != null && (
+            <p className="text-xs text-white/55">
+              {PLANET_TYPES[world].blurb}. Prone to {PLANET_TYPES[world].hazard}s. Weak to {PLANET_TYPES[world].weakTo}: {PLANET_TYPES[world].weakWhy}.
+            </p>
+          )}
           <button className="mt-1 rounded-lg bg-sky-400 px-4 py-2.5 font-semibold text-slate-950 transition hover:bg-sky-300">Create your planet</button>
           <p className="text-xs text-white/40">Coming soon: other gods&apos; planets in your universe, to trade with or invade.</p>
         </form>
