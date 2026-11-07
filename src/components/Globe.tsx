@@ -24,7 +24,7 @@ const COLORS: Record<T, string> = {
 };
 const FARM = new THREE.Color("#c9cf5b");
 // Deposits are speckled onto some of their tiles so the player can spot them.
-const DEPOSIT: Record<D, THREE.Color | null> = { [D.None]: null, [D.Metal]: new THREE.Color("#5b6f8f"), [D.Gold]: new THREE.Color("#ffd447"), [D.Herbs]: new THREE.Color("#b066d6") };
+const DEPOSIT: Record<D, THREE.Color | null> = { [D.None]: null, [D.Metal]: new THREE.Color("#5b6f8f"), [D.Gold]: new THREE.Color("#ffd447"), [D.Herbs]: new THREE.Color("#3fd6b0") };
 const WHITE = new THREE.Color("#ffffff");
 const WALL = new THREE.Color("#efe3cf");
 const SHRINE = new THREE.Color("#ffd447");

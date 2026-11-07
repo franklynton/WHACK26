@@ -265,6 +265,15 @@ export default function Game({ playerName }: { playerName: string }) {
           <Stock icon="🪙" label="Gold" value={stats.resources.gold} />
           <Stock icon="🌿" label="Herbs (medicine)" value={stats.resources.herbs} />
         </div>
+        {/* Map key for the coloured specks on the globe (see DEPOSIT in Globe.tsx) */}
+        <div className="-mt-2 flex justify-between text-[11px] text-white/50">
+          {[["#5b6f8f", "Metal"], ["#ffd447", "Gold"], ["#3fd6b0", "Herbs"]].map(([c, label]) => (
+            <span key={label} className="flex items-center gap-1">
+              <span className="h-2 w-2 rounded-sm" style={{ background: c }} />
+              {label} deposits
+            </span>
+          ))}
+        </div>
         <div>
           <p className="label mb-1.5">Nations ({hud.nations.filter((n) => n.alive).length})</p>
           <ul className="space-y-1">
