@@ -5,8 +5,8 @@ import { useState } from "react";
 const STEPS = [
   { icon: "🌍", title: "Get a planet", text: "Every planet is different. Some are rich in wood, others in metal, gold or rare medicinal herbs." },
   { icon: "🧍", title: "Raise a people", text: "Tiny people wander, farm and build villages. Once they settle, they become aware of you, their god." },
-  { icon: "✨", title: "Shape their world", text: "Raise mountains, flood valleys, send rain or drought, work miracles or rain down meteors." },
-  { icon: "💬", title: "Talk to them", text: "Your people share one mind, powered by AI. They pray, plead and argue with you, and decide what to do next." },
+  { icon: "🎲", title: "Fate rules their world", text: "Rain, drought, miracles, fire and meteors fall at random. Your people will think you sent them." },
+  { icon: "💬", title: "Talk to them", text: "Your people share one mind, powered by AI. They pray, plead and argue with you. Your words are your only power: use them to keep the nations at peace." },
 ];
 
 const NAME_KEY = "arda-player-name";
