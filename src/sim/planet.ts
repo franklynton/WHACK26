@@ -119,7 +119,7 @@ export const MIRACLES: { id: MiracleId; name: string; icon: string; cost: number
 export type Prayer = { id: number; nation: number; kind: "rain" | "harvest" | "peace" | "sign"; other?: number; text: string; cost: number; at: number };
 export type Choice = { id: number; kind: "disaster" | "war" | "revolution"; title: string; text: string; face: number; nations: number[]; cost: number; at: number };
 export const GOAL_YEAR = 30; // calendar year the goal is judged at
-const PRAYER_LIFE = 40, CHOICE_LIFE = 15; // seconds before an unanswered prayer or choice lapses
+export const PRAYER_LIFE = 15, CHOICE_LIFE = 15; // seconds before an unanswered prayer or choice lapses
 const DISASTER_ICONS = new Set(["🌊", "☄️", "🌋", "⛈️", "🫨", "☀️", "☠️"]);
 // A drought's heat haze over `face`, for the globe to draw while it lasts.
 export type Drought = { id: number; face: number; at: number; r: number; life: number };
