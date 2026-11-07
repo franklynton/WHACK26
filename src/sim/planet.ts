@@ -4,6 +4,7 @@
 import * as THREE from "three";
 import { fbm, tileRand } from "./noise";
 import { MAX_LEVEL, UPGRADES, VALUE, canAfford, upgradeCost, type UpgradeId } from "./upgrades";
+import { RACE, RACES, eraOf, ERAS, makeLeader, type Leader, type RaceId } from "./races";
 import type { Crisis, GodPower, NationInfo, Needs, PlanetStats, Policy, Relation, Resources } from "@/types/world";
 
 export const DETAIL = 36; // tiles = 20 * (DETAIL + 1)^2
@@ -77,6 +78,9 @@ export interface Nation {
   stability: number;
   recentDeaths: number;
   alive: boolean;
+  race: RaceId; // see src/sim/races.ts: changes births, war, gathering, faith and tech speed
+  tech: number; // progress up the eras towards space (ERA_AT in races.ts)
+  leader: Leader; // the ruler the god can talk to
 }
 
 // A drifting rain cloud or storm. `pos` is a unit vector; `face` is the tile underneath.
@@ -122,18 +126,31 @@ export interface PlanetType {
   rockLine: number; // elevation where land turns to bare rock
   deposits: number; // how many ore and herb deposits to scatter
   yield: Resources;
+  hazard: string; // the natural disaster this world suffers most (see maybeDisaster)
+  hazardRoll: number; // the roll in maybeDisaster that triggers it
+  weakTo: string; // the planet type whose armies beat this one (for invasions between planets)
+  weakWhy: string;
 }
 export const PLANET_TYPES: PlanetType[] = [
-  { name: "Verdant", blurb: "Fertile plains, rich in food and herbs", ocean: 0.56, moisture: 0.08, rockLine: 0.5, deposits: 0.6, yield: { food: 2, wood: 1, stone: 0.6, metal: 0.5, gold: 0.4, herbs: 1.6 } },
-  { name: "Timberworld", blurb: "Endless forests, rich in wood", ocean: 0.5, moisture: 0.2, rockLine: 0.5, deposits: 0.6, yield: { food: 1, wood: 2.2, stone: 0.6, metal: 0.5, gold: 0.5, herbs: 1.3 } },
-  { name: "Ironworld", blurb: "Mountain ranges veined with metal", ocean: 0.48, moisture: -0.02, rockLine: 0.28, deposits: 1.8, yield: { food: 0.8, wood: 0.8, stone: 1.6, metal: 2.2, gold: 0.7, herbs: 0.5 } },
-  { name: "Gilded", blurb: "Dry hills hiding rich gold seams", ocean: 0.45, moisture: -0.16, rockLine: 0.4, deposits: 1.4, yield: { food: 0.7, wood: 0.6, stone: 1.2, metal: 1, gold: 2.4, herbs: 0.4 } },
-  { name: "Archipelago", blurb: "Scattered islands, scarce land, rare medicines", ocean: 0.72, moisture: 0.1, rockLine: 0.45, deposits: 1, yield: { food: 1.6, wood: 1.2, stone: 1, metal: 0.6, gold: 0.8, herbs: 2 } },
+  { name: "Verdant", blurb: "Fertile plains, rich in food and herbs", ocean: 0.56, moisture: 0.08, rockLine: 0.5, deposits: 0.6, yield: { food: 2, wood: 1, stone: 0.6, metal: 0.5, gold: 0.4, herbs: 1.6 }, hazard: "plague", hazardRoll: 0.96, weakTo: "Ironworld", weakWhy: "iron blades cut through farmers" },
+  { name: "Timberworld", blurb: "Endless forests, rich in wood", ocean: 0.5, moisture: 0.2, rockLine: 0.5, deposits: 0.6, yield: { food: 1, wood: 2.2, stone: 0.6, metal: 0.5, gold: 0.5, herbs: 1.3 }, hazard: "lightning storm", hazardRoll: 0.4, weakTo: "Verdant", weakWhy: "well-fed armies outlast hungry loggers" },
+  { name: "Ironworld", blurb: "Mountain ranges veined with metal", ocean: 0.48, moisture: -0.02, rockLine: 0.28, deposits: 1.8, yield: { food: 0.8, wood: 0.8, stone: 1.6, metal: 2.2, gold: 0.7, herbs: 0.5 }, hazard: "volcano", hazardRoll: 0.27, weakTo: "Gilded", weakWhy: "gold hires their smiths away" },
+  { name: "Gilded", blurb: "Dry hills hiding rich gold seams", ocean: 0.45, moisture: -0.16, rockLine: 0.4, deposits: 1.4, yield: { food: 0.7, wood: 0.6, stone: 1.2, metal: 1, gold: 2.4, herbs: 0.4 }, hazard: "drought", hazardRoll: 0.6, weakTo: "Archipelago", weakWhy: "island pirates raid the gold coast" },
+  { name: "Archipelago", blurb: "Scattered islands, scarce land, rare medicines", ocean: 0.72, moisture: 0.1, rockLine: 0.45, deposits: 1, yield: { food: 1.6, wood: 1.2, stone: 1, metal: 0.6, gold: 0.8, herbs: 2 }, hazard: "tsunami", hazardRoll: 0.05, weakTo: "Timberworld", weakWhy: "timber fleets blockade the islands" },
 ];
 
 const MAX_PEOPLE = 1500;
 const BIRTHS: Record<Policy, number> = { settle: 1, expand: 1.2, farm: 1.4, worship: 0.9, explore: 1, hoard: 0.6, rebel: 0.8 };
 const STEP_TIME = 0.7; // seconds to walk one tile
+
+// Attack bonus between planets: rock-paper-scissors on planet type (weakTo above).
+export function invasionBonus(attacker: string, defender: string) {
+  const d = PLANET_TYPES.find((t) => t.name === defender);
+  const a = PLANET_TYPES.find((t) => t.name === attacker);
+  if (d?.weakTo === attacker) return 1.5;
+  if (a?.weakTo === defender) return 0.67;
+  return 1;
+}
 const VILLAGE_RANGE = 0.2; // radians: how far people roam from home / how close villages can be
 
 export class PlanetSim {
@@ -421,7 +438,7 @@ export class PlanetSim {
   // ---- Nations ----
 
   // Start 2-5 nations, each with a small band of people as far apart as the land allows.
-  seedNations(count = 2 + Math.floor(Math.random() * 4), peoplePerNation = 10) {
+  seedNations(count = 2 + Math.floor(Math.random() * 4), peoplePerNation = 10, firstRace?: RaceId) {
     const starts = [this.bestStart()];
     const candidates: number[] = [];
     for (let f = 0; f < this.n; f += 3) if (this.terrain[f] === T.Grass || this.terrain[f] === T.Forest) candidates.push(f);
@@ -436,7 +453,13 @@ export class PlanetSim {
       }
       starts.push(best);
     }
-    this.nations = starts.map((_, i) => ({ id: i, name: `the ${NATION_HUES[i]} tribe`, color: NATION_COLORS[i], policy: "settle" as Policy, faith: 50, stability: 70, recentDeaths: 0, alive: true }));
+    // The god's chosen race goes first; the others are drawn so races don't repeat until all are used.
+    const pool = RACES.map((r) => r.id).filter((r) => r !== firstRace).sort(() => Math.random() - 0.5);
+    const races = starts.map((_, i) => (i === 0 && firstRace ? firstRace : pool[(i - (firstRace ? 1 : 0)) % pool.length]));
+    this.nations = starts.map((_, i) => ({
+      id: i, name: `the ${NATION_HUES[i]} ${RACE[races[i]].plural}`, color: NATION_COLORS[i], policy: "settle" as Policy, faith: 50, stability: 70, recentDeaths: 0, alive: true,
+      race: races[i], tech: 0, leader: makeLeader(RACE[races[i]]),
+    }));
     const k = this.nations.length;
     this.relation = Array.from({ length: k }, () => new Array<Relation>(k).fill("peace"));
     this.tension = Array.from({ length: k }, () => new Array<number>(k).fill(0));
@@ -445,6 +468,14 @@ export class PlanetSim {
     starts.forEach((f, i) => {
       for (let j = 0; j < peoplePerNation; j++) this.spawnNear(f, i);
     });
+  }
+
+  race(id: number) {
+    return RACE[this.nations[id]?.race ?? "human"];
+  }
+  // Races thrive on their home world: more children and better gathering.
+  private homeBonus(id: number) {
+    return this.race(id).home === this.type.name ? 1.2 : 1;
   }
 
   nationName(id: number) {
@@ -583,9 +614,10 @@ export class PlanetSim {
     for (const p of this.people) {
       const nt = this.nations[p.nation];
       const pol = nt.policy;
+      const race = RACE[nt.race];
       p.age += dt;
-      p.hunger -= (pol === "hoard" ? 0.035 : 0.05) * dt;
-      p.t += dt / STEP_TIME;
+      p.hunger -= (pol === "hoard" ? 0.035 : 0.05) * race.appetite * dt;
+      p.t += (dt / STEP_TIME) * race.speed;
       if (p.village !== null && villageById.get(p.village)?.nation !== p.nation) p.village = null;
       if (p.t < 1 || p.hunger <= 0) continue;
 
@@ -601,27 +633,28 @@ export class PlanetSim {
       if (home) {
         const peace = (0.5 + nt.stability / 100) * (1 + (0.25 + 0.15 * this.levels.markets) * this.tradePartners(p.nation));
         const tools = 1 + 0.3 * this.levels.smithing;
+        const ry = (r: keyof Resources) => (race.yield[r] ?? 1) * this.homeBonus(p.nation); // what this race is good at
         const t = this.terrain[p.face] as T;
         if (p.hunger > 0.9 && this.food[p.face] > 0.2) {
           this.food[p.face] -= 0.1;
-          this.gain("food", 0.1 * peace * this.type.yield.food * (1 + 0.3 * this.levels.irrigation));
+          this.gain("food", 0.1 * peace * this.type.yield.food * ry("food") * (1 + 0.3 * this.levels.irrigation));
         }
         const y = this.type.yield;
         if (t === T.Forest) {
-          this.gain("wood", 0.03 * peace * y.wood * tools);
+          this.gain("wood", 0.03 * peace * y.wood * ry("wood") * tools);
           // Logging: woodcutters slowly clear the forest near home, felling the tile for a big haul.
           if (this.angle(p.face, home.face) < 0.09 && Math.random() < 0.06) {
             this.forest[p.face] = 0;
             this.classify(p.face);
-            this.gain("wood", 0.6 * y.wood * tools);
+            this.gain("wood", 0.6 * y.wood * ry("wood") * tools);
             this.version++;
           }
         }
-        if (t === T.Rock) this.gain("stone", 0.05 * peace * y.stone * tools);
+        if (t === T.Rock) this.gain("stone", 0.05 * peace * y.stone * ry("stone") * tools);
         const d = this.deposit[p.face] as D;
-        if (d === D.Metal) this.gain("metal", 0.06 * peace * y.metal * tools);
-        if (d === D.Gold) this.gain("gold", 0.03 * peace * y.gold);
-        if (d === D.Herbs) this.gain("herbs", 0.02 * peace * y.herbs);
+        if (d === D.Metal) this.gain("metal", 0.06 * peace * y.metal * ry("metal") * tools);
+        if (d === D.Gold) this.gain("gold", 0.03 * peace * y.gold * ry("gold"));
+        if (d === D.Herbs) this.gain("herbs", 0.02 * peace * y.herbs * ry("herbs"));
       }
 
       // War: fight any enemy on this tile or the next one. Either side may fall.
@@ -631,7 +664,10 @@ export class PlanetSim {
           const foe = at.get(f)?.find((q) => q.hunger > 0 && this.atWar(p.nation, q.nation));
           if (foe && Math.random() < 0.35) {
             // The more stable nation fights a little better.
-            const pWins = Math.random() < 0.5 + (nt.stability - this.nations[foe.nation].stability) / 400;
+            // Race matters most: goblins and dwarves win more fights than elves.
+            const foeRace = RACE[this.nations[foe.nation].race];
+            const odds = 0.5 + (nt.stability - this.nations[foe.nation].stability) / 400 + (race.fight - foeRace.fight) * 0.2;
+            const pWins = Math.random() < Math.max(0.1, Math.min(0.9, odds));
             const dead = pWins ? foe : p;
             dead.hunger = -1; // removed below
             this.nations[dead.nation].recentDeaths += 1;
@@ -674,7 +710,7 @@ export class PlanetSim {
       p.face = next;
 
       // Children: well-fed adults, a little more often in a village.
-      if (p.hunger > 0.55 && p.age > 16 && p.age < 45 && Math.random() < (home ? 0.09 : 0.05) * STEP_TIME * BIRTHS[pol] && this.people.length + born.length < MAX_PEOPLE) {
+      if (p.hunger > 0.55 && p.age > 16 && p.age < 45 && Math.random() < (home ? 0.09 : 0.05) * STEP_TIME * BIRTHS[pol] * race.births * this.homeBonus(p.nation) && this.people.length + born.length < MAX_PEOPLE) {
         born.push({ id: this.nextId++, face: p.face, from: p.face, t: 0, hunger: 0.6, age: 0, village: p.village, nation: p.nation });
         p.hunger -= 0.2;
       }
@@ -693,7 +729,7 @@ export class PlanetSim {
       }
     }
     this.people = this.people.filter((p) => {
-      if (p.hunger > 0 && p.age < 55 + (p.id % 25) + Math.min(20, this.resources.herbs / 20) + 8 * this.levels.medicine) return true;
+      if (p.hunger > 0 && p.age < 55 + this.race(p.nation).lifespan + (p.id % 25) + Math.min(20, this.resources.herbs / 20) + 8 * this.levels.medicine) return true;
       if (p.hunger > -1) this.nations[p.nation].recentDeaths++; // war deaths were counted already
       return false;
     });
@@ -949,7 +985,7 @@ export class PlanetSim {
     for (const nt of this.nations) {
       if (!nt.alive) continue;
       const food = this.nationFood(nt.id);
-      const decay = (nt.policy === "worship" ? 0.1 : nt.policy === "rebel" ? 1.2 : 0.3) * (1 - 0.25 * this.levels.temples);
+      const decay = (nt.policy === "worship" ? 0.1 : nt.policy === "rebel" ? 1.2 : 0.3) * (1 - 0.25 * this.levels.temples) * RACE[nt.race].faithDecay;
       nt.faith = Math.max(0, nt.faith - decay * dt);
       // Rebels burn the god's shrines now and then.
       const mine = this.villages.filter((v) => v.nation === nt.id);
@@ -957,8 +993,26 @@ export class PlanetSim {
       nt.recentDeaths *= Math.pow(0.85, dt); // fades over a few seconds
       const wars = this.relation[nt.id].filter((r) => r === "war").length;
       const target =
-        (nt.policy === "worship" ? 50 : 40) + Math.min(30, mine.length * 4) + (food - 50) * 0.4 - Math.min(40, nt.recentDeaths * 1.5) - wars * 15 + this.tradePartners(nt.id) * 5 + 6 * this.levels.stone;
+        (nt.policy === "worship" ? 50 : 40) + Math.min(30, mine.length * 4) + (food - 50) * 0.4 - Math.min(40, nt.recentDeaths * 1.5) - wars * 15 + this.tradePartners(nt.id) * 5 + 6 * this.levels.stone + RACE[nt.race].stability;
       nt.stability = Math.max(0, Math.min(100, nt.stability + (target - nt.stability) * 0.15 * dt));
+      this.stepTech(nt, mine.length, dt);
+    }
+  }
+
+  // Climbing the eras: bigger, calmer nations invent faster, and race sets the pace
+  // (goblins are ten times slower than humans). Reaching a new era is news.
+  private stepTech(nt: Nation, villages: number, dt: number) {
+    if (!villages) return;
+    const pop = this.people.filter((p) => p.nation === nt.id).length;
+    const before = eraOf(nt.tech);
+    nt.tech += Math.sqrt(pop) * (0.5 + nt.stability / 100) * 0.35 * RACE[nt.race].tech * dt;
+    const after = eraOf(nt.tech);
+    if (after > before) {
+      const space = after === ERAS.length - 1;
+      const text = space ? `${cap(nt.name)} have reached the Space Age! Their first ship leaves the planet.` : `${cap(nt.name)} enter the ${ERAS[after]}.`;
+      this.events.push({ kind: "milestone", detail: text, nation: nt.id });
+      const home = this.nationHome(nt.id);
+      if (home != null) this.announce(space ? "🚀" : "📜", space ? "The Space Age" : `The ${ERAS[after]}`, text, home);
     }
   }
 
@@ -1213,7 +1267,8 @@ export class PlanetSim {
     this.nextDisaster = 20 + Math.random() * 25;
     // Usually aim near people, so the disaster matters.
     const target = this.people.length && Math.random() < 0.75 ? this.people[Math.floor(Math.random() * this.people.length)].face : Math.floor(Math.random() * this.n);
-    const roll = Math.random();
+    // Each planet type suffers its own hazard far more often (volcanoes on Ironworld, tsunamis on Archipelago...).
+    const roll = Math.random() < 0.45 ? this.type.hazardRoll : Math.random();
     // The big three play out over several years and announce themselves.
     if (roll < 0.12) return void (this.startTsunami(target) || this.startVolcano(target));
     if (roll < 0.22) return this.startMeteor(target, 0.06 + Math.random() * 0.04, true);
@@ -1329,6 +1384,10 @@ export class PlanetSim {
       cities: this.villages.filter((v) => v.nation === nt.id && v.tier === 2).length,
       towns: this.villages.filter((v) => v.nation === nt.id && v.tier === 1).length,
       capital: this.capital(nt.id)?.name,
+      race: nt.race,
+      tech: Math.round(nt.tech),
+      era: eraOf(nt.tech),
+      leader: nt.leader,
       needs: this.nationNeeds(nt.id),
       crisis: this.crisis(nt.id),
       relations: this.nations

@@ -6,10 +6,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Globe from "./Globe";
 import Upgrades, { affordableCount } from "./Upgrades";
+import LeaderDialog from "./LeaderDialog";
+import Portrait, { type Mood } from "./Portrait";
+import { ERAS, RACE, type RaceId } from "@/sim/races";
 import { UPGRADES, type UpgradeId } from "@/sim/upgrades";
-import { PlanetSim, type SimEvent } from "@/sim/planet";
-import { fallbackCiv, fallbackReaction, fallbackThought } from "@/lib/narrator";
-import type { ChronicleEntry, ChronicleKind, Civ, Crisis, MindMessage, NationInfo, Needs, PlanetStats, Policy, Relation, World } from "@/types/world";
+import { PLANET_TYPES, PlanetSim, type SimEvent } from "@/sim/planet";
+import { fallbackCiv, fallbackLeader, fallbackReaction, fallbackThought, type LeaderReply } from "@/lib/narrator";
+import type { ChronicleEntry, ChronicleKind, Civ, Crisis, LeaderMessage, MindMessage, NationInfo, Needs, PlanetStats, Policy, Relation, World } from "@/types/world";
 
 const SPEEDS = [
   { label: "⏸", speed: 0 },
@@ -49,10 +52,12 @@ interface Hud {
   levels: PlanetSim["levels"];
 }
 
-export default function Game({ playerName, planetName = "Arda" }: { playerName: string; planetName?: string }) {
+export default function Game({ playerName, planetName = "Arda", race, worldType }: { playerName: string; planetName?: string; race?: RaceId; worldType?: number }) {
   const [sim] = useState(() => {
-    const s = new PlanetSim();
-    s.seedNations(); // 2 to 5 nations, far apart
+    // The planet type comes from the seed (seed % 5), so a chosen world just picks a matching seed.
+    const seed = worldType == null ? undefined : Math.floor(Math.random() * 2e5) * PLANET_TYPES.length + worldType;
+    const s = new PlanetSim(seed);
+    s.seedNations(undefined, 10, race); // 2 to 5 nations, far apart; the first is the god's chosen race
     return s;
   });
   const count = sim.nations.length;
@@ -68,6 +73,13 @@ export default function Game({ playerName, planetName = "Arda" }: { playerName: 
   const [shop, setShop] = useState(false); // upgrades drawer open
   const [focus, setFocus] = useState<{ face: number; key: number } | null>(null); // where the camera flies to
   const [hover, setHover] = useState<{ id: number; x: number; y: number } | null>(null); // nation under the mouse
+  // Audiences with each nation's leader (separate from the people's shared mind).
+  const [talkTo, setTalkTo] = useState<number | null>(null);
+  const [leaderChats, setLeaderChats] = useState<LeaderMessage[][]>(() => Array.from({ length: count }, () => []));
+  const [moods, setMoods] = useState<Mood[]>(() => new Array(count).fill("pleased"));
+  const [leaderBusy, setLeaderBusy] = useState(false);
+  const leaderChatsRef = useRef(leaderChats);
+  leaderChatsRef.current = leaderChats;
 
   // Refs so timers always see the latest state without re-subscribing.
   const civsRef = useRef(civs);
@@ -117,6 +129,9 @@ export default function Game({ playerName, planetName = "Arda" }: { playerName: 
           population: info.population,
           villages: info.villages,
           relations: info.relations.map((r) => ({ name: sim.nationName(r.id), relation: r.relation, tension: r.tension })),
+          race: info.race,
+          era: info.era,
+          leader: info.leader,
         },
       };
     },
@@ -236,6 +251,47 @@ export default function Game({ playerName, planetName = "Arda" }: { playerName: 
     pump();
   };
 
+  // An audience with a leader. They speak first when you arrive, then answer each thing you say.
+  // What they decide changes the sim: a new focus for their people, or friendship or hostility to a neighbour.
+  const askLeader = async (id: number, history: LeaderMessage[]) => {
+    setLeaderBusy(true);
+    try {
+      const r = await post<LeaderReply>("/api/leader", { world: worldFor(id), chat: history });
+      const next = leaderChatsRef.current.map((c, i) => (i === id ? [...history, { from: "leader" as const, text: r.reply }].slice(-30) : c));
+      leaderChatsRef.current = next;
+      setLeaderChats(next);
+      setMoods((m) => m.map((x, i) => (i === id ? r.mood : x)));
+      const nt = sim.nations[id];
+      const who = `${nt.leader.title} ${nt.leader.name}`;
+      if (r.policy && r.policy !== nt.policy) {
+        nt.policy = r.policy;
+        addEntry({ year: sim.year, kind: "mind", nation: id, text: `${who} orders ${cap(nt.name)} to turn to ${POLICY_LABEL[r.policy].toLowerCase()}.` });
+      }
+      const other = r.toward && sim.nations.find((o) => o.id !== id && o.alive && o.name.toLowerCase() === r.toward!.nation.toLowerCase());
+      if (other) {
+        sim.sway(id, other.id, r.toward!.stance === "hostile" ? 12 : -12); // a ruler's word counts for more than the mind's
+        addEntry({ year: sim.year, kind: "diplomacy", nation: id, text: `${who} ${r.toward!.stance === "hostile" ? "swears vengeance on" : "sends gifts to"} ${cap(other.name)}.` });
+      }
+    } finally {
+      setLeaderBusy(false);
+    }
+  };
+  const openLeader = (id: number) => {
+    if (!sim.nations[id].alive) return;
+    setTalkTo(id);
+    if (!leaderChatsRef.current[id].length) askLeader(id, []);
+  };
+  const sayToLeader = (text: string) => {
+    if (talkTo == null) return;
+    const id = talkTo;
+    const history = [...leaderChatsRef.current[id], { from: "god" as const, text }];
+    const next = leaderChatsRef.current.map((c, i) => (i === id ? history : c));
+    leaderChatsRef.current = next;
+    setLeaderChats(next);
+    sim.nations[id].faith = Math.min(100, sim.nations[id].faith + 10); // their god appeared to their king
+    askLeader(id, history);
+  };
+
   // Buying an upgrade: the people notice the gift and talk about it.
   const buy = (id: UpgradeId) => {
     if (!sim.buy(id)) return;
@@ -264,7 +320,12 @@ export default function Game({ playerName, planetName = "Arda" }: { playerName: 
             Year {Math.floor(hud.year)} · God: {playerName}
           </p>
           <p className="truncate text-2xl font-semibold" title={planetName}>{planetName}</p>
-          <p className="text-xs text-white/55">{sim.type.name} world</p>
+          <p className="text-xs text-white/55">
+            {sim.type.name} world · prone to {sim.type.hazard}s
+          </p>
+          <p className="text-[11px] text-white/40" title="Between planets: armies from this kind of world beat yours">
+            Weak to {sim.type.weakTo} ({sim.type.weakWhy})
+          </p>
           <div className="my-2 flex gap-2">
             <div className="flex-1 rounded-lg bg-sky-400/15 px-2.5 py-1.5" title="Resources produced per year, weighted by value. Peace, trade and upgrades raise it.">
               <p className="text-[10px] uppercase tracking-wider text-sky-200/70">Output / yr</p>
@@ -312,10 +373,12 @@ export default function Game({ playerName, planetName = "Arda" }: { playerName: 
                 >
                   <div className="flex items-center gap-2">
                     <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: n.color }} />
+                    <span title={RACE[n.race].name}>{RACE[n.race].icon}</span>
                     <span className="flex-1 truncate font-medium">{cap(n.name)}</span>
                     <span className="text-xs tabular-nums text-white/50">{n.alive ? n.population : "fallen"}</span>
                   </div>
                   <div className="ml-4.5 flex flex-wrap gap-x-2 text-xs">
+                    {n.alive && <span className="text-amber-200/70">{ERAS[n.era]}</span>}
                     {n.crisis && <span className="font-semibold uppercase text-rose-300">{n.crisis}</span>}
                     {n.relations
                       .filter((r) => n.alive && r.relation !== "peace")
@@ -364,6 +427,10 @@ export default function Game({ playerName, planetName = "Arda" }: { playerName: 
         <p className="text-xs text-white/40">Drag to rotate · scroll to zoom · fate decides the weather, you can only talk</p>
       </div>
 
+      {talkTo != null && hud.nations[talkTo] && (
+        <LeaderDialog nation={hud.nations[talkTo]} civ={civs[talkTo]} chat={leaderChats[talkTo]} mood={moods[talkTo]} busy={leaderBusy} onSay={sayToLeader} onClose={() => setTalkTo(null)} />
+      )}
+
       {hover && hud.nations[hover.id] && <NationCard n={hud.nations[hover.id]} civ={civs[hover.id]} all={hud.nations} x={hover.x} y={hover.y} />}
 
       {/* The chosen nation's mind */}
@@ -373,6 +440,25 @@ export default function Game({ playerName, planetName = "Arda" }: { playerName: 
             <span className="h-3 w-3 rounded-full" style={{ background: me.color }} />
             <p className="text-lg font-semibold">{cap(me.name)}</p>
           </div>
+          <button
+            onClick={() => openLeader(sel)}
+            disabled={!me.alive}
+            className="flex w-full items-center gap-3 rounded-xl bg-white/5 p-2 text-left transition hover:bg-white/10 disabled:opacity-40"
+            title="Hold an audience with their leader"
+          >
+            <span className="shrink-0 overflow-hidden rounded-lg">
+              <Portrait race={me.race} seed={me.leader.seed} color={me.color} mood={moods[sel]} size={52} />
+            </span>
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-semibold">
+                {me.leader.title} {me.leader.name}
+              </span>
+              <span className="block text-xs text-white/55">
+                {RACE[me.race].icon} {RACE[me.race].name} · {ERAS[me.era]}
+              </span>
+              <span className="block text-xs text-sky-300">🗣️ Talk to the leader</span>
+            </span>
+          </button>
           <NeedBars needs={me.needs} crisis={me.crisis} />
           {civ ? (
             <>
@@ -451,6 +537,7 @@ async function post<T>(url: string, body: unknown): Promise<T> {
 }
 
 function offline(url: string, { world, kind, chat = [] }: { world: World; kind?: ChronicleKind; chat?: MindMessage[] }) {
+  if (url === "/api/leader") return fallbackLeader(world, chat as unknown as LeaderMessage[]);
   if (url === "/api/mind") {
     const t = fallbackThought(world, chat);
     return { civ: { ...world.civ, attitude: t.attitude }, reply: t.reply, policy: t.policy, reason: t.reason, toward: t.toward ?? null };
@@ -474,6 +561,9 @@ function NationCard({ n, civ, all, x, y }: { n: NationInfo; civ: Civ | null; all
         <p className="font-semibold">{cap(n.name)}</p>
         {n.crisis && <span className="ml-auto text-xs font-semibold uppercase text-rose-300">{n.crisis}</span>}
       </div>
+      <p className="text-xs text-white/60">
+        {RACE[n.race].icon} {RACE[n.race].name} · {ERAS[n.era]} · led by {n.leader.title} {n.leader.name}
+      </p>
       {civ && <p className="text-xs text-white/60">{cap(civ.demonym)} · worship {civ.religion.godName} ({civ.religion.name}) · feel {civ.attitude}</p>}
       <p className="text-xs text-white/70">
         {n.alive ? `${n.population} people · ${n.villages} ${n.villages === 1 ? "village" : "villages"} · ${POLICY_LABEL[n.policy].toLowerCase()}` : "Fallen"}
