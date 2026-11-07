@@ -9,6 +9,7 @@ import LeaderDialog from "./LeaderDialog";
 import Portrait, { type Mood } from "./Portrait";
 import { ERAS, RACE, type RaceId } from "@/sim/races";
 import { PLANET_TYPES, PlanetSim, SECONDS_PER_YEAR, type SimEvent } from "@/sim/planet";
+import { sound } from "@/lib/sound";
 import { fallbackCiv, fallbackLeader, fallbackReaction, fallbackThought, type LeaderReply } from "@/lib/narrator";
 import type { ChronicleEntry, ChronicleKind, Civ, Crisis, LeaderMessage, MindMessage, NationInfo, Needs, PlanetStats, Policy, Relation, World } from "@/types/world";
 
@@ -59,6 +60,30 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
   });
   const count = sim.nations.length;
   const [speed, setSpeed] = useState(1);
+  const [muted, setMuted] = useState(() => {
+    try {
+      return localStorage.getItem("arda-muted") === "1";
+    } catch {
+      return false;
+    }
+  });
+  // Sound starts with the game (the click that created the planet allows it), or else on the next click.
+  useEffect(() => {
+    sound.setMuted(muted);
+    try {
+      localStorage.setItem("arda-muted", muted ? "1" : "0");
+    } catch {}
+  }, [muted]);
+  useEffect(() => {
+    const go = () => sound.start();
+    go();
+    window.addEventListener("pointerdown", go);
+    window.addEventListener("keydown", go);
+    return () => {
+      window.removeEventListener("pointerdown", go);
+      window.removeEventListener("keydown", go);
+    };
+  }, []);
   const [hud, setHud] = useState<Hud>(() => readHud(sim));
   const [civs, setCivs] = useState<(Civ | null)[]>(() => new Array(count).fill(null));
   const [chats, setChats] = useState<MindMessage[][]>(() => Array.from({ length: count }, () => []));
@@ -91,6 +116,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
   const lastAnyThought = useRef(Date.now());
   const answerDue = useRef<number | null>(null); // the god spoke to this nation and it hasn't answered yet
   const lastNews = useRef(0);
+  const lastAlert = useRef(sim.alert);
   const lastTold = useRef<Record<string, number>>({}); // year each kind of event was last narrated, per nation
 
   const setCiv = (id: number, civ: Civ) => {
@@ -214,6 +240,8 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
       if (civsRef.current.length < sim.nations.length) growTo(sim.nations.length);
       const h = readHud(sim);
       setHud(h);
+      if (h.alert && h.alert !== lastAlert.current) sound.forIcon(h.alert.icon); // each new pop-up has its own sound
+      lastAlert.current = h.alert;
       for (const e of sim.events.splice(0)) {
         const awake = sim.nations.filter((n) => civsRef.current[n.id]).map((n) => n.id);
         const nation = e.nation ?? awake[Math.floor(Math.random() * awake.length)];
@@ -396,7 +424,15 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
             ))}
           </ul>
         </div>
-        <div className="mt-auto flex justify-center">
+        <div className="mt-auto flex items-end justify-center gap-2">
+          <button
+            onClick={() => setMuted((m) => !m)}
+            className="rounded-lg bg-white/5 px-2.5 py-1 text-sm transition hover:bg-white/10"
+            title={muted ? "Turn sound on" : "Mute"}
+            aria-label={muted ? "Turn sound on" : "Mute"}
+          >
+            {muted ? "🔇" : "🔊"}
+          </button>
           <Segmented options={SPEEDS.map((s) => s.label)} value={SPEEDS.findIndex((s) => s.speed === speed)} onChange={(i) => setSpeed(SPEEDS[i].speed)} title="Speed" />
         </div>
         {!awake && <p className="text-xs text-white/55">Your nations are wandering. When each founds a village it will become aware of you. Your words are your only power: talk them out of fighting.</p>}
