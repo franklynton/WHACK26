@@ -8,7 +8,7 @@ const BY_ICON: Record<string, Fx> = {
   "🌋": "rumble", "🫨": "rumble", "⛈️": "thunder", "🌊": "wave", "🌧️": "wave", "☄️": "whoosh", "💥": "boom",
   "🏘️": "chime", "🏙️": "chime", "⛵": "chime", "🌲": "chime", "🕊️": "chime", "⚔️": "horn", "😈": "horn",
   "🏳️": "horn", "👑": "horn", "⚓": "chime", "🏴‍☠️": "horn", "🙏": "sparkle", "⚡": "thunder", "💀": "toll", "☠️": "toll", "☀️": "toll", "📜": "fanfare", "🚀": "fanfare", "✨": "sparkle",
-  "⛰️": "rumble", "🔥": "fire",
+  "⛰️": "rumble", "🔥": "fire", "🛸": "whoosh",
 };
 
 class Sound {

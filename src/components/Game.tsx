@@ -5,6 +5,7 @@
 // (src/sim/planet.ts) to the LLM routes (/api/narrate, /api/mind).
 import { useCallback, useEffect, useRef, useState } from "react";
 import Globe from "./Globe";
+import Galaxy from "./Galaxy";
 import LeaderDialog from "./LeaderDialog";
 import Portrait, { type Mood } from "./Portrait";
 import { ERAS, RACE, type RaceId } from "@/sim/races";
@@ -654,21 +655,8 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
           </div>
         </div>
       )}
-      {/* The galaxy: unlocked when your nation reaches the Space Age. Multiplayer (other players' planets) plugs in here. */}
-      {galaxy && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setGalaxy(false)}>
-          <div className="glass w-[26rem] p-6 text-center" onClick={(e) => e.stopPropagation()}>
-            <div className="text-5xl">🌌</div>
-            <h2 className="mt-3 text-2xl font-bold">The galaxy</h2>
-            <p className="mt-2 text-sm text-white/75">
-              {cap(hud.nations[0]?.name ?? "your people")} have left {planetName}. Other gods&apos; planets will appear here, to trade with, start trade wars with, or invade.
-            </p>
-            <button onClick={() => setGalaxy(false)} className="mt-5 rounded-lg bg-white/10 px-4 py-2 text-sm font-semibold hover:bg-white/20">
-              Back to {planetName}
-            </button>
-          </div>
-        </div>
-      )}
+      {/* The galaxy (multiplayer): always syncing, opened by the Galaxy button once your nation reaches the Space Age */}
+      <Galaxy sim={sim} ownerName={playerName} planetName={planetName} open={galaxy && hud.god.spacefaring} onClose={() => setGalaxy(false)} />
     </main>
   );
 }

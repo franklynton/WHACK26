@@ -116,7 +116,7 @@ export default function Landing({ onStart }: { onStart: (playerName: string, pla
             </p>
           )}
           <button className="mt-1 rounded-lg bg-sky-400 px-4 py-2.5 font-semibold text-slate-950 transition hover:bg-sky-300">Create your planet</button>
-          <p className="text-xs text-white/40">Coming soon: other gods&apos; planets in your universe, to trade with or invade.</p>
+          <p className="text-xs text-white/40">Reach the Space Age to travel to other gods&apos; planets, to trade with or invade.</p>
         </form>
       </section>
 

@@ -25,6 +25,20 @@ npm run dev
 
 Open http://localhost:3000, enter your name and create your planet.
 
+## Multiplayer galaxy
+
+1. Create a Supabase project.
+2. Copy the project URL and anon/service-role keys into `.env.local`:
+   ```bash
+   NEXT_PUBLIC_SUPABASE_URL=...
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+   SUPABASE_SERVICE_ROLE_KEY=...
+   ```
+3. Run `supabase/migrations/001_galaxy.sql`, then `002_galaxy_fixes.sql`, in the Supabase SQL editor.
+4. Add the same three variables to the Vercel project's environment variables.
+
+Every planet syncs to the galaxy every five seconds. Once your nation reaches the Space Age, the Galaxy button unlocks: send resources to, or invade, any planet that is online. Server-side SQL functions validate tokens, amounts and invasion cooldowns, and the result lands in both games (the other player's planet gets the resources, or loses people and gold).
+
 ## How we work
 
 - One branch per track (`nations`, `multiplayer`, `economy`, `polish`), with small PRs into `main`.

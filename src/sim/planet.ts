@@ -2171,6 +2171,24 @@ export class PlanetSim {
     this.produced += amount * VALUE[r];
   }
 
+  // ---- The galaxy (multiplayer): effects of trades and invasions with other players' planets ----
+
+  // Resources sent to (negative) or received from (positive) another planet.
+  galaxyTrade(r: keyof Resources, amount: number, other: string) {
+    this.resources[r] = Math.max(0, this.resources[r] + amount);
+    const home = this.nationHome(0);
+    if (amount > 0 && home != null) this.announce("🛸", "A gift from the stars", `${other} sent ${amount} ${r}.`, home);
+  }
+
+  // Another god's fleet raided us: some people die near the home village.
+  invadedFromSpace(attacker: string, lost: number) {
+    let left = lost;
+    this.killWhere(() => left > 0 && Math.random() < 0.3 && left-- > 0);
+    this.resources.gold = Math.max(0, this.resources.gold - 20);
+    const home = this.nationHome(0);
+    if (home != null) this.announce("🛸", "Invaded from space!", `A fleet from ${attacker} raided the planet.`, home);
+  }
+
   // Military strength (for invading other planets later): a fifth of the population can fight.
   military() {
     return Math.round(this.people.length * 0.2); // one in five people can fight
