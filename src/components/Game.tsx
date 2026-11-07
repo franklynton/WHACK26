@@ -55,7 +55,6 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
     const seed = worldType == null ? undefined : Math.floor(Math.random() * 2e5) * PLANET_TYPES.length + worldType;
     const s = new PlanetSim(seed);
     s.seedNations(undefined, 10, race); // 3 to 5 nations, far apart; the first is the god's chosen race
-    (globalThis as unknown as { __sim: PlanetSim }).__sim = s;
     return s;
   });
   const count = sim.nations.length;
@@ -332,7 +331,7 @@ export default function Game({ playerName, planetName = "Arda", race, worldType 
               <p className="text-[10px] uppercase tracking-wider text-sky-200/70">Output / yr</p>
               <p className="text-xl font-bold tabular-nums">{hud.output.toLocaleString()}</p>
             </div>
-            <div className="flex-1 rounded-lg bg-white/5 px-2.5 py-1.5" title="Military strength, for invading other planets. Build an Army to raise it.">
+            <div className="flex-1 rounded-lg bg-white/5 px-2.5 py-1.5" title="Military strength: one in five of your people can fight.">
               <p className="text-[10px] uppercase tracking-wider text-white/50">Military</p>
               <p className="text-xl font-bold tabular-nums">{hud.military}</p>
             </div>
