@@ -181,6 +181,15 @@ export const PLANET_TYPES: PlanetType[] = [
   { name: "Archipelago", blurb: "Scattered islands, scarce land, rare medicines", ocean: 0.72, moisture: 0.1, rockLine: 0.45, deposits: 1, yield: { food: 1.6, wood: 1.2, stone: 1, metal: 0.6, gold: 0.8, herbs: 2 }, hazard: "tsunami", hazardRoll: 0.05, weakTo: "Timberworld", weakWhy: "timber fleets blockade the islands" },
 ];
 
+export type UpgradeId = "irrigation" | "forestry" | "masonry" | "foundry" | "temples";
+export const UPGRADES: { id: UpgradeId; name: string; icon: string; description: string; max: number; costs: Partial<Resources>[] }[] = [
+  { id: "irrigation", name: "Irrigation", icon: "💧", description: "Better farms produce more food.", max: 3, costs: [{ wood: 30, stone: 15 }, { wood: 60, stone: 35, metal: 10 }, { wood: 100, stone: 60, metal: 25 }] },
+  { id: "forestry", name: "Forest Stewardship", icon: "🌲", description: "Careful woodland management increases wood production.", max: 3, costs: [{ food: 25, stone: 15 }, { food: 50, stone: 30, metal: 10 }, { food: 90, stone: 50, metal: 20 }] },
+  { id: "masonry", name: "Masonry", icon: "🧱", description: "Skilled builders bring more stone from every quarry.", max: 3, costs: [{ wood: 25, food: 20 }, { wood: 50, metal: 15, food: 35 }, { wood: 80, metal: 30, food: 60 }] },
+  { id: "foundry", name: "Advanced Foundry", icon: "⚒️", description: "Improved tools increase metal and gold yields.", max: 3, costs: [{ stone: 30, wood: 20 }, { stone: 60, wood: 40, gold: 5 }, { stone: 100, wood: 70, gold: 15 }] },
+  { id: "temples", name: "Grand Temples", icon: "✨", description: "Monuments inspire worship and devotion.", max: 2, costs: [{ stone: 40, gold: 5 }, { stone: 90, gold: 20 }] },
+];
+
 const MAX_PEOPLE = 1500;
 const BIRTHS: Record<Policy, number> = { settle: 1, expand: 1.2, farm: 1.4, worship: 0.9, explore: 1, hoard: 0.6, rebel: 0.8 };
 const STEP_TIME = 0.7; // seconds to walk one tile
@@ -260,6 +269,7 @@ export class PlanetSim {
   // Stockpiled resources: the planet's score, and later what it trades with other planets.
   // Production is scaled by stability, so a peaceful planet out-produces a troubled one.
   resources: Resources = { food: 0, wood: 0, stone: 0, metal: 0, gold: 0, herbs: 0 };
+  upgrades: Record<UpgradeId, number> = { irrigation: 0, forestry: 0, masonry: 0, foundry: 0, temples: 0 };
   output = 0; // the planet's production per year, in value points (see VALUE): the score
   private produced = 0; // value gathered since the last output sample
   private outputTimer = 0;
@@ -1105,7 +1115,7 @@ export class PlanetSim {
     for (const nt of this.nations) {
       if (!this.aware(nt)) continue;
       // Worship pays: more from a nation that loves you or is busy worshipping.
-      this.devotion += dt * (0.07 + (nt.policy === "worship" ? 0.15 : 0)) * (0.3 + this.loveOf(nt.id) / 50);
+      this.devotion += dt * (0.07 + (nt.policy === "worship" ? 0.15 : 0)) * (0.3 + this.loveOf(nt.id) / 50) * (1 + this.upgrades.temples * 0.2);
       // Love slowly fades back towards indifference, and a nation that hates you grows restless.
       this.adore(nt.id, (50 - this.loveOf(nt.id)) * 0.004 * dt);
       if (this.loveOf(nt.id) < 15) nt.stability -= 0.3 * dt;
@@ -2234,8 +2244,22 @@ export class PlanetSim {
   // ---- Economy ----
 
   private gain(r: keyof Resources, amount: number) {
-    this.resources[r] += amount;
-    this.produced += amount * VALUE[r];
+    const boost = r === "food" ? this.upgrades.irrigation : r === "wood" ? this.upgrades.forestry : r === "stone" ? this.upgrades.masonry : r === "metal" || r === "gold" ? this.upgrades.foundry : 0;
+    const improved = amount * (1 + boost * 0.15);
+    this.resources[r] += improved;
+    this.produced += improved * VALUE[r];
+  }
+
+  purchaseUpgrade(id: UpgradeId) {
+    const upgrade = UPGRADES.find((item) => item.id === id);
+    if (!upgrade) return false;
+    const level = this.upgrades[id];
+    const cost = upgrade.costs[level];
+    if (!cost) return false;
+    if (Object.entries(cost).some(([resource, amount]) => this.resources[resource as keyof Resources] < amount)) return false;
+    for (const [resource, amount] of Object.entries(cost)) this.resources[resource as keyof Resources] -= amount!;
+    this.upgrades[id] = level + 1;
+    return true;
   }
 
   // ---- The galaxy (multiplayer): effects of trades and invasions with other players' planets ----

@@ -9,11 +9,42 @@ import Galaxy, { type GalaxyStatus } from "./Galaxy";
 import LeaderDialog from "./LeaderDialog";
 import Portrait, { type Mood } from "./Portrait";
 import { ERAS, RACE, type RaceId } from "@/sim/races";
-import { CHOICE_LIFE, GOAL_YEAR, MIRACLES, PRAYER_LIFE, PLANET_TYPES, PlanetSim, SECONDS_PER_YEAR, type MiracleId, type SimEvent } from "@/sim/planet";
+import {
+  CHOICE_LIFE,
+  GOAL_YEAR,
+  MIRACLES,
+  PRAYER_LIFE,
+  PLANET_TYPES,
+  PlanetSim,
+  SECONDS_PER_YEAR,
+  UPGRADES,
+  type MiracleId,
+  type SimEvent,
+} from "@/sim/planet";
 import { sound } from "@/lib/sound";
 import { saveGame, type Save } from "@/lib/save";
-import { fallbackCiv, fallbackLeader, fallbackReaction, fallbackThought, type LeaderReply } from "@/lib/narrator";
-import type { ChronicleEntry, ChronicleKind, Civ, Crisis, LeaderMessage, MindMessage, NationInfo, Needs, PlanetStats, Policy, Relation, World } from "@/types/world";
+import {
+  fallbackCiv,
+  fallbackLeader,
+  fallbackReaction,
+  fallbackThought,
+  type LeaderReply,
+} from "@/lib/narrator";
+import type {
+  ChronicleEntry,
+  ChronicleKind,
+  Civ,
+  Crisis,
+  LeaderMessage,
+  MindMessage,
+  NationInfo,
+  Needs,
+  PlanetStats,
+  Policy,
+  Relation,
+  Resources,
+  World,
+} from "@/types/world";
 
 const POLICY_LABEL: Record<Policy, string> = {
   settle: "Settling down",
@@ -24,7 +55,10 @@ const POLICY_LABEL: Record<Policy, string> = {
   hoard: "Hoarding",
   rebel: "Rebelling",
 };
-const RELATION_STYLE: Record<Relation, { icon: string; cls: string; label: string }> = {
+const RELATION_STYLE: Record<
+  Relation,
+  { icon: string; cls: string; label: string }
+> = {
   peace: { icon: "·", cls: "text-white/40", label: "at peace" },
   trade: { icon: "🤝", cls: "text-emerald-300", label: "trading" },
   rival: { icon: "😠", cls: "text-amber-300", label: "rivals" },
@@ -47,10 +81,34 @@ interface Hud {
   alert: PlanetSim["alert"];
   output: number;
   military: number;
-  god: { devotion: number; ready: PlanetSim["ready"]; prayers: PlanetSim["prayers"]; spacefaring: boolean; choice: PlanetSim["choice"]; outcome: PlanetSim["outcome"]; avgLove: number };
+  god: {
+    devotion: number;
+    ready: PlanetSim["ready"];
+    prayers: PlanetSim["prayers"];
+    spacefaring: boolean;
+    choice: PlanetSim["choice"];
+    outcome: PlanetSim["outcome"];
+    avgLove: number;
+  };
 }
 
-export default function Game({ playerName, planetName = "Arda", race, worldType, demo, resume, onNewPlanet }: { playerName: string; planetName?: string; race?: RaceId; worldType?: number; demo?: boolean; resume?: Save; onNewPlanet?: () => void }) {
+export default function Game({
+  playerName,
+  planetName = "Arda",
+  race,
+  worldType,
+  demo,
+  resume,
+  onNewPlanet,
+}: {
+  playerName: string;
+  planetName?: string;
+  race?: RaceId;
+  worldType?: number;
+  demo?: boolean;
+  resume?: Save;
+  onNewPlanet?: () => void;
+}) {
   const [sim] = useState(() => {
     if (resume) {
       try {
@@ -60,14 +118,21 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
       }
     }
     // The planet type comes from the seed (seed % 5), so a chosen world just picks a matching seed.
-    const seed = worldType == null ? undefined : Math.floor(Math.random() * 2e5) * PLANET_TYPES.length + worldType;
+    const seed =
+      worldType == null
+        ? undefined
+        : Math.floor(Math.random() * 2e5) * PLANET_TYPES.length + worldType;
     const s = new PlanetSim(seed);
     s.seedNations(undefined, 10, race); // 3 to 5 nations, far apart; the first is the god's chosen race
     if (demo) s.startDemo();
     return s;
   });
   const count = sim.nations.length;
-  const [ui] = useState(() => (resume?.ui && resume.ui.civs.length === sim.nations.length ? resume.ui : null)); // what the HUD had when the game was saved
+  const [ui] = useState(() =>
+    resume?.ui && resume.ui.civs.length === sim.nations.length
+      ? resume.ui
+      : null,
+  ); // what the HUD had when the game was saved
   const [muted, setMuted] = useState(() => {
     try {
       return localStorage.getItem("arda-muted") === "1";
@@ -96,6 +161,20 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
   const [miracle, setMiracle] = useState<MiracleId | null>(null); // picked from the bar; click the land to cast
   const [seenOutcome, setSeenOutcome] = useState(false);
   const [galaxy, setGalaxy] = useState(false);
+  const [upgradesOpen, setUpgradesOpen] = useState(false);
+  const resourcesPanelRef = useRef<HTMLDivElement>(null);
+  const upgradesMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!upgradesOpen) return;
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (!resourcesPanelRef.current?.contains(target) && !upgradesMenuRef.current?.contains(target)) {
+        setUpgradesOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    return () => document.removeEventListener("pointerdown", closeOnOutsideClick);
+  }, [upgradesOpen]);
   const [link, setLink] = useState<GalaxyStatus>({ enabled: null, galaxy: null, members: 0 }); // the galaxy connection, for the HUD
   useEffect(() => {
     const esc = (e: KeyboardEvent) => e.key === "Escape" && setMiracle(null);
@@ -108,19 +187,37 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
       setHud(readHud(sim));
     }
   };
-  const [civs, setCivs] = useState<(Civ | null)[]>(() => ui?.civs ?? new Array(count).fill(null));
-  const [chats, setChats] = useState<MindMessage[][]>(() => ui?.chats ?? Array.from({ length: count }, () => []));
-  const [reasons, setReasons] = useState<string[]>(() => ui?.reasons ?? new Array(count).fill(""));
-  const [chronicle, setChronicle] = useState<Entry[]>(() => ui?.chronicle ?? []);
+  const [civs, setCivs] = useState<(Civ | null)[]>(
+    () => ui?.civs ?? new Array(count).fill(null),
+  );
+  const [chats, setChats] = useState<MindMessage[][]>(
+    () => ui?.chats ?? Array.from({ length: count }, () => []),
+  );
+  const [reasons, setReasons] = useState<string[]>(
+    () => ui?.reasons ?? new Array(count).fill(""),
+  );
+  const [chronicle, setChronicle] = useState<Entry[]>(
+    () => ui?.chronicle ?? [],
+  );
   const [sel, setSel] = useState(() => ui?.sel ?? 0); // the nation the god is looking at and talking to
   const [busy, setBusy] = useState<"" | "narrating" | "thinking">("");
   const [draft, setDraft] = useState("");
-  const [focus, setFocus] = useState<{ face: number; key: number } | null>(null); // where the camera flies to
-  const [hover, setHover] = useState<{ id: number; x: number; y: number } | null>(null); // nation under the mouse
+  const [focus, setFocus] = useState<{ face: number; key: number } | null>(
+    null,
+  ); // where the camera flies to
+  const [hover, setHover] = useState<{
+    id: number;
+    x: number;
+    y: number;
+  } | null>(null); // nation under the mouse
   // Audiences with each nation's leader (separate from the people's shared mind).
   const [talkTo, setTalkTo] = useState<number | null>(null);
-  const [leaderChats, setLeaderChats] = useState<LeaderMessage[][]>(() => ui?.leaderChats ?? Array.from({ length: count }, () => []));
-  const [moods, setMoods] = useState<Mood[]>(() => ui?.moods ?? new Array(count).fill("pleased"));
+  const [leaderChats, setLeaderChats] = useState<LeaderMessage[][]>(
+    () => ui?.leaderChats ?? Array.from({ length: count }, () => []),
+  );
+  const [moods, setMoods] = useState<Mood[]>(
+    () => ui?.moods ?? new Array(count).fill("pleased"),
+  );
   const [leaderBusy, setLeaderBusy] = useState(false);
   const leaderChatsRef = useRef(leaderChats);
   leaderChatsRef.current = leaderChats;
@@ -134,7 +231,18 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
   chronicleRef.current = chronicle;
   const queue = useRef<Item[]>([]); // events waiting to be narrated
   // Nations that just founded their first village (on a reload, any settled nation whose mind hadn't woken yet).
-  const genesisDue = useRef<number[]>(ui ? sim.nations.filter((n) => n.alive && !ui.civs[n.id] && sim.villages.some((v) => v.nation === n.id)).map((n) => n.id) : []);
+  const genesisDue = useRef<number[]>(
+    ui
+      ? sim.nations
+          .filter(
+            (n) =>
+              n.alive &&
+              !ui.civs[n.id] &&
+              sim.villages.some((v) => v.nation === n.id),
+          )
+          .map((n) => n.id)
+      : [],
+  );
   const inFlight = useRef(false);
   const lastThought = useRef<number[]>(new Array(count).fill(Date.now()));
   const lastAnyThought = useRef(Date.now());
@@ -151,7 +259,13 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
     const save = () =>
       saveGame({
         meta: { playerName, planetName, race, demo },
-        ui: { civs: civsRef.current, chats: chatsRef.current, leaderChats: leaderChatsRef.current, chronicle: chronicleRef.current, ...latest.current },
+        ui: {
+          civs: civsRef.current,
+          chats: chatsRef.current,
+          leaderChats: leaderChatsRef.current,
+          chronicle: chronicleRef.current,
+          ...latest.current,
+        },
         sim: sim.toSave(),
         at: Date.now(),
       });
@@ -172,7 +286,10 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
   };
   // New nations can appear mid-game (breakaways, newcomers): grow every per-nation list to match.
   const growTo = (k: number) => {
-    const pad = <T,>(a: T[], fill: () => T) => [...a, ...Array.from({ length: Math.max(0, k - a.length) }, fill)];
+    const pad = <T,>(a: T[], fill: () => T) => [
+      ...a,
+      ...Array.from({ length: Math.max(0, k - a.length) }, fill),
+    ];
     civsRef.current = pad(civsRef.current, () => null);
     setCivs(civsRef.current);
     chatsRef.current = pad(chatsRef.current, () => []);
@@ -184,7 +301,9 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
     lastThought.current = pad(lastThought.current, () => Date.now());
   };
   const addChat = (id: number, m: MindMessage) => {
-    const next = chatsRef.current.map((c, i) => (i === id ? [...c, m].slice(-30) : c));
+    const next = chatsRef.current.map((c, i) =>
+      i === id ? [...c, m].slice(-30) : c,
+    );
     chatsRef.current = next;
     setChats(next);
   };
@@ -208,7 +327,11 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
           name: sim.nationName(id),
           population: info.population,
           villages: info.villages,
-          relations: info.relations.map((r) => ({ name: sim.nationName(r.id), relation: r.relation, tension: r.tension })),
+          relations: info.relations.map((r) => ({
+            name: sim.nationName(r.id),
+            relation: r.relation,
+            tension: r.tension,
+          })),
           race: info.race,
           era: info.era,
           leader: info.leader,
@@ -238,14 +361,24 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
     try {
       if (genesis != null) {
         setBusy("narrating");
-        const res = await post<{ civ: Civ; entry: ChronicleEntry }>("/api/narrate", { world: worldFor(genesis), kind: "genesis" });
+        const res = await post<{ civ: Civ; entry: ChronicleEntry }>(
+          "/api/narrate",
+          { world: worldFor(genesis), kind: "genesis" },
+        );
         setCiv(genesis, res.civ);
         addEntry({ ...res.entry, nation: genesis });
         lastThought.current[genesis] = Date.now() - THINK_EVERY_MS * gap + 15_000 * gap; // first words soon after waking
       } else if (next) {
         setBusy("narrating");
         lastNews.current = Date.now();
-        const res = await post<{ civ: Civ; entry: ChronicleEntry }>("/api/narrate", { world: worldFor(next.nation), kind: next.kind, detail: next.detail });
+        const res = await post<{ civ: Civ; entry: ChronicleEntry }>(
+          "/api/narrate",
+          {
+            world: worldFor(next.nation),
+            kind: next.kind,
+            detail: next.detail,
+          },
+        );
         setCiv(next.nation, res.civ);
         addEntry({ ...res.entry, nation: next.nation });
       } else if (thinker != null) {
@@ -263,26 +396,47 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
     setBusy("thinking");
     lastThought.current[id] = lastAnyThought.current = Date.now();
     const w = worldFor(id);
-    const res = await post<{ civ: Civ; reply: string; policy: Policy; reason: string; toward: { nation: string; stance: string } | null }>("/api/mind", {
+    const res = await post<{
+      civ: Civ;
+      reply: string;
+      policy: Policy;
+      reason: string;
+      toward: { nation: string; stance: string } | null;
+    }>("/api/mind", {
       world: w,
       chat: chatsRef.current[id],
     });
     setCiv(id, res.civ);
     addChat(id, { from: "mind", text: res.reply });
     const nt = sim.nations[id];
-    if (res.policy !== nt.policy) addEntry({ year: w.year, kind: "mind", nation: id, text: `${res.civ.name} turn to ${POLICY_LABEL[res.policy].toLowerCase()}: ${res.reason}` });
+    if (res.policy !== nt.policy)
+      addEntry({
+        year: w.year,
+        kind: "mind",
+        nation: id,
+        text: `${res.civ.name} turn to ${POLICY_LABEL[res.policy].toLowerCase()}: ${res.reason}`,
+      });
     nt.policy = res.policy;
     setReasons((r) => r.map((x, i) => (i === id ? res.reason : x)));
     // The mind's stance towards a neighbour nudges the tension between them.
-    const other = res.toward && sim.nations.find((o) => o.id !== id && o.alive && o.name.toLowerCase() === res.toward!.nation.toLowerCase());
-    if (other) sim.sway(id, other.id, res.toward!.stance === "hostile" ? 6 : -6);
+    const other =
+      res.toward &&
+      sim.nations.find(
+        (o) =>
+          o.id !== id &&
+          o.alive &&
+          o.name.toLowerCase() === res.toward!.nation.toLowerCase(),
+      );
+    if (other)
+      sim.sway(id, other.id, res.toward!.stance === "hostile" ? 6 : -6);
   };
 
   // Poll the sim for the HUD, collect its events, and keep the LLM pump going.
   useEffect(() => {
     const lastCrisis: (Crisis | null)[] = new Array(count).fill(null);
     const id = setInterval(() => {
-      if (civsRef.current.length < sim.nations.length) growTo(sim.nations.length);
+      if (civsRef.current.length < sim.nations.length)
+        growTo(sim.nations.length);
       const h = readHud(sim);
       setHud(h);
       // A new ruler (after a revolution) doesn't remember the old one's audiences.
@@ -290,15 +444,20 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
         const was = leaderSeeds.current[n.id];
         leaderSeeds.current[n.id] = n.leader.seed;
         if (was == null || was === n.leader.seed) return;
-        leaderChatsRef.current = leaderChatsRef.current.map((c, i) => (i === n.id ? [] : c));
+        leaderChatsRef.current = leaderChatsRef.current.map((c, i) =>
+          i === n.id ? [] : c,
+        );
         setLeaderChats(leaderChatsRef.current);
         setMoods((m) => m.map((x, i) => (i === n.id ? "pleased" : x)));
       });
       if (h.alert && h.alert !== lastAlert.current) sound.forIcon(h.alert.icon); // each new pop-up has its own sound
       lastAlert.current = h.alert;
       for (const e of sim.events.splice(0)) {
-        const awake = sim.nations.filter((n) => civsRef.current[n.id]).map((n) => n.id);
-        const nation = e.nation ?? awake[Math.floor(Math.random() * awake.length)];
+        const awake = sim.nations
+          .filter((n) => civsRef.current[n.id])
+          .map((n) => n.id);
+        const nation =
+          e.nation ?? awake[Math.floor(Math.random() * awake.length)];
         if (nation == null) continue;
         if (!civsRef.current[nation]) {
           // A nation becomes self-aware when it founds its first village.
@@ -309,15 +468,29 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
           continue;
         }
         // Don't narrate the same kind of thing for the same nation twice in quick succession.
-        const big = e.kind === "diplomacy" || e.kind === "captured" || e.kind === "fallen";
-        const key = big ? `${e.kind}:${Math.min(nation, e.other ?? nation)}-${Math.max(nation, e.other ?? nation)}` : `${e.kind}:${nation}`;
-        if (e.kind !== "milestone" && sim.year - (lastTold.current[key] ?? -999) < (big ? 25 : 90)) continue;
+        const big =
+          e.kind === "diplomacy" ||
+          e.kind === "captured" ||
+          e.kind === "fallen";
+        const key = big
+          ? `${e.kind}:${Math.min(nation, e.other ?? nation)}-${Math.max(nation, e.other ?? nation)}`
+          : `${e.kind}:${nation}`;
+        if (
+          e.kind !== "milestone" &&
+          sim.year - (lastTold.current[key] ?? -999) < (big ? 25 : 90)
+        )
+          continue;
         lastTold.current[key] = sim.year;
         if (e.kind === "village" && h.nations[nation].villages > 1) continue; // routine growth
         queue.current.push({ ...e, nation });
       }
       for (const n of h.nations) {
-        if (n.crisis && n.crisis !== lastCrisis[n.id] && civsRef.current[n.id]) queue.current.push({ kind: n.crisis, detail: `A ${n.crisis} has begun in ${n.name}.`, nation: n.id });
+        if (n.crisis && n.crisis !== lastCrisis[n.id] && civsRef.current[n.id])
+          queue.current.push({
+            kind: n.crisis,
+            detail: `A ${n.crisis} has begun in ${n.name}.`,
+            nation: n.id,
+          });
         lastCrisis[n.id] = n.crisis;
       }
       queue.current = queue.current.slice(-2); // stay current: drop old news if the LLM falls behind
@@ -331,7 +504,10 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
     let id = face == null ? -1 : sim.owner[face];
     if (face != null && id < 0) {
       const near = (f: number) => sim.angle(f, face) < 0.05;
-      id = sim.villages.find((v) => near(v.face))?.nation ?? sim.people.find((p) => near(p.face))?.nation ?? -1;
+      id =
+        sim.villages.find((v) => near(v.face))?.nation ??
+        sim.people.find((p) => near(p.face))?.nation ??
+        -1;
     }
     setHover(id >= 0 ? { id, x, y } : null);
   };
@@ -352,8 +528,15 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
   const askLeader = async (id: number, history: LeaderMessage[]) => {
     setLeaderBusy(true);
     try {
-      const r = await post<LeaderReply>("/api/leader", { world: worldFor(id), chat: history });
-      const next = leaderChatsRef.current.map((c, i) => (i === id ? [...history, { from: "leader" as const, text: r.reply }].slice(-30) : c));
+      const r = await post<LeaderReply>("/api/leader", {
+        world: worldFor(id),
+        chat: history,
+      });
+      const next = leaderChatsRef.current.map((c, i) =>
+        i === id
+          ? [...history, { from: "leader" as const, text: r.reply }].slice(-30)
+          : c,
+      );
       leaderChatsRef.current = next;
       setLeaderChats(next);
       setMoods((m) => m.map((x, i) => (i === id ? r.mood : x)));
@@ -361,12 +544,29 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
       const who = `${nt.leader.title} ${nt.leader.name}`;
       if (r.policy && r.policy !== nt.policy) {
         nt.policy = r.policy;
-        addEntry({ year: sim.calendar, kind: "mind", nation: id, text: `${who} orders ${cap(nt.name)} to turn to ${POLICY_LABEL[r.policy].toLowerCase()}.` });
+        addEntry({
+          year: sim.calendar,
+          kind: "mind",
+          nation: id,
+          text: `${who} orders ${cap(nt.name)} to turn to ${POLICY_LABEL[r.policy].toLowerCase()}.`,
+        });
       }
-      const other = r.toward && sim.nations.find((o) => o.id !== id && o.alive && o.name.toLowerCase() === r.toward!.nation.toLowerCase());
+      const other =
+        r.toward &&
+        sim.nations.find(
+          (o) =>
+            o.id !== id &&
+            o.alive &&
+            o.name.toLowerCase() === r.toward!.nation.toLowerCase(),
+        );
       if (other) {
         sim.sway(id, other.id, r.toward!.stance === "hostile" ? 12 : -12); // a ruler's word counts for more than the mind's
-        addEntry({ year: sim.calendar, kind: "diplomacy", nation: id, text: `${who} ${r.toward!.stance === "hostile" ? "swears vengeance on" : "sends gifts to"} ${cap(other.name)}.` });
+        addEntry({
+          year: sim.calendar,
+          kind: "diplomacy",
+          nation: id,
+          text: `${who} ${r.toward!.stance === "hostile" ? "swears vengeance on" : "sends gifts to"} ${cap(other.name)}.`,
+        });
       }
     } finally {
       setLeaderBusy(false);
@@ -380,7 +580,10 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
   const sayToLeader = (text: string) => {
     if (talkTo == null) return;
     const id = talkTo;
-    const history = [...leaderChatsRef.current[id], { from: "god" as const, text }];
+    const history = [
+      ...leaderChatsRef.current[id],
+      { from: "god" as const, text },
+    ];
     const next = leaderChatsRef.current.map((c, i) => (i === id ? history : c));
     leaderChatsRef.current = next;
     setLeaderChats(next);
@@ -392,10 +595,27 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
   const me = hud.nations[sel];
   const chat = chats[sel];
   const awake = civs.filter(Boolean).length;
+  const availableUpgrades = UPGRADES.filter((upgrade) => {
+    const cost = upgrade.costs[sim.upgrades[upgrade.id]];
+    return (
+      cost &&
+      Object.entries(cost).every(
+        ([resource, amount]) =>
+          stats.resources[resource as keyof typeof stats.resources] >= amount,
+      )
+    );
+  }).length;
   return (
     <main className="relative h-dvh w-full overflow-hidden select-none">
       <div className="absolute inset-0 isolate">
-        <Globe sim={sim} tool={miracle ? MIRACLES.find((m) => m.id === miracle)!.tool : "hand"} speed={sim.pace} onPaint={(_, face) => cast(face)} onHover={hoverAt} focus={focus} />
+        <Globe
+          sim={sim}
+          tool={miracle ? MIRACLES.find((m) => m.id === miracle)!.tool : "hand"}
+          speed={sim.pace}
+          onPaint={(_, face) => cast(face)}
+          onHover={hoverAt}
+          focus={focus}
+        />
       </div>
 
       {/* The planet and its nations */}
@@ -403,97 +623,151 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
         <div>
           <p className="label">
             Year {Math.floor(hud.year / SECONDS_PER_YEAR)} · God: {playerName}
-            {demo && <span className="ml-1.5 rounded bg-indigo-400/25 px-1.5 py-0.5 text-[10px] font-bold text-indigo-100">DEMO {sim.pace}x</span>}
+            {demo && (
+              <span className="ml-1.5 rounded bg-indigo-400/25 px-1.5 py-0.5 text-[10px] font-bold text-indigo-100">
+                DEMO {sim.pace}x
+              </span>
+            )}
           </p>
-          <p className="truncate text-2xl font-semibold" title={planetName}>{planetName}</p>
+          <p className="truncate text-2xl font-semibold" title={planetName}>
+            {planetName}
+          </p>
           <p className="text-xs text-white/55">
             {sim.type.name} world · prone to {sim.type.hazard}s
           </p>
-          <p className="text-[11px] text-white/40" title="Between planets: armies from this kind of world beat yours">
+          <p
+            className="text-[11px] text-white/40"
+            title="Between planets: armies from this kind of world beat yours"
+          >
             Weak to {sim.type.weakTo} ({sim.type.weakWhy})
           </p>
           <div className="my-2 flex gap-2">
-            <div className="flex-1 rounded-lg bg-sky-400/15 px-2.5 py-1.5" title="Resources produced per year, weighted by value. Peace and trade raise it.">
-              <p className="text-[10px] uppercase tracking-wider text-sky-200/70">Output / yr</p>
-              <p className="text-xl font-bold tabular-nums">{hud.output.toLocaleString()}</p>
+            <div
+              className="flex-1 rounded-lg bg-sky-400/15 px-2.5 py-1.5"
+              title="Resources produced per year, weighted by value. Peace and trade raise it."
+            >
+              <p className="text-[10px] uppercase tracking-wider text-sky-200/70">
+                Output / yr
+              </p>
+              <p className="text-xl font-bold tabular-nums">
+                {hud.output.toLocaleString()}
+              </p>
             </div>
-            <div className="flex-1 rounded-lg bg-white/5 px-2.5 py-1.5" title="Military strength: one in five of your people can fight.">
-              <p className="text-[10px] uppercase tracking-wider text-white/50">Military</p>
+            <div
+              className="flex-1 rounded-lg bg-white/5 px-2.5 py-1.5"
+              title="Military strength: one in five of your people can fight."
+            >
+              <p className="text-[10px] uppercase tracking-wider text-white/50">
+                Military
+              </p>
               <p className="text-xl font-bold tabular-nums">{hud.military}</p>
             </div>
           </div>
-          <div className="mb-2 rounded-lg bg-amber-300/10 px-2.5 py-1.5" title="Your power. Nations earn it for you by worshipping; it grows faster when they love you. Spend it on miracles, prayers and interventions.">
-            <p className="text-[10px] uppercase tracking-wider text-amber-200/70">Devotion</p>
-            <p className="text-xl font-bold tabular-nums">✨ {Math.floor(hud.god.devotion)}</p>
+          <div
+            className="mb-2 rounded-lg bg-amber-300/10 px-2.5 py-1.5"
+            title="Your power. Nations earn it for you by worshipping; it grows faster when they love you. Spend it on miracles, prayers and interventions."
+          >
+            <p className="text-[10px] uppercase tracking-wider text-amber-200/70">
+              Devotion
+            </p>
+            <p className="text-xl font-bold tabular-nums">
+              ✨ {Math.floor(hud.god.devotion)}
+            </p>
           </div>
           <Goal hud={hud} />
           <p className="text-xs text-white/45">{sim.type.blurb}</p>
           <p className="text-sm text-white/60">
-            {stats.population.toLocaleString()} people · {stats.villages} {stats.villages === 1 ? "village" : "villages"}
+            {stats.population.toLocaleString()} people · {stats.villages}{" "}
+            {stats.villages === 1 ? "village" : "villages"}
           </p>
-        </div>
-        <div className="grid grid-cols-3 gap-2 text-center">
-          <Stock align="left" icon="🌾" label="Food" info="Harvested by well-fed people from the land around their homes. Worth 1 point of Output." value={stats.resources.food} />
-          <Stock icon="🪵" label="Wood" info="Cut from forests, which slowly get cleared around towns. Worth 1 point of Output." value={stats.resources.wood} />
-          <Stock align="right" icon="🪨" label="Stone" info="Quarried from rocky mountainsides. Worth 2 points of Output." value={stats.resources.stone} />
-          <Stock align="left" icon="⚙️" label="Metal" info="Mined from ore in the mountains. Worth 3 points of Output." value={stats.resources.metal} />
-          <Stock icon="💰" label="Gold" info="Mined only at gold deposits, the yellow specks on the map. The most valuable: worth 5 points of Output." value={stats.resources.gold} />
-          <Stock align="right" icon="🌿" label="Herbs" info="Medicinal plants gathered in forests. A stockpile helps people live longer and resist plague. Worth 3 points of Output." value={stats.resources.herbs} />
-        </div>
-        {/* Map key for the coloured specks on the globe (see DEPOSIT in Globe.tsx) */}
-        <div className="-mt-2 flex justify-between text-[11px] text-white/50">
-          {[["#ffd447", "Gold"]].map(([c, label]) => (
-            <span key={label} className="flex items-center gap-1">
-              <span className="h-2 w-2 rounded-sm" style={{ background: c }} />
-              {label} deposits
-            </span>
-          ))}
         </div>
         <div>
           <p className="label mb-1.5">
             Nations ({hud.nations.filter((n) => n.alive).length})
-            {hud.nations.some((n) => !n.alive) && <span className="normal-case text-white/40"> · {hud.nations.filter((n) => !n.alive).length} fallen</span>}
+            {hud.nations.some((n) => !n.alive) && (
+              <span className="normal-case text-white/40">
+                {" "}
+                · {hud.nations.filter((n) => !n.alive).length} fallen
+              </span>
+            )}
           </p>
           <ul className="space-y-1">
-            {hud.nations.filter((n) => n.alive).map((n) => (
-              <li key={n.id}>
-                <button
-                  onClick={() => {
-                    setSel(n.id);
-                    const face = sim.nationHome(n.id);
-                    if (face != null) setFocus({ face, key: Date.now() });
-                  }}
-                  className={`w-full rounded-lg px-2 py-1.5 text-left text-sm transition ${sel === n.id ? "bg-white/15" : "hover:bg-white/5"} ${n.alive ? "" : "opacity-40"}`}
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: n.color }} />
-                    <span title={RACE[n.race].name}>{RACE[n.race].icon}</span>
-                    <span className="flex-1 truncate font-medium">{cap(n.name)}</span>
-                    <span className="text-xs tabular-nums text-white/50">{n.alive ? n.population : "fallen"}</span>
-                  </div>
-                  <div className="ml-4.5 flex flex-wrap gap-x-2 text-xs">
-                    {n.alive && <span className="text-amber-200/70">{ERAS[n.era]}</span>}
-                    {!!n.ships && <span className="text-sky-200/80" title={`Navy: ${n.ships} warship${n.ships === 1 ? "" : "s"}`}>⚓ {n.ships}</span>}
-                    {n.crisis && <span className="font-semibold uppercase text-rose-300">{n.crisis}</span>}
-                    {n.relations
-                      .filter((r) => n.alive && r.relation !== "peace")
-                      .map((r) => (
-                        <span key={r.id} className={RELATION_STYLE[r.relation].cls} title={`${RELATION_STYLE[r.relation].label}, tension ${r.tension}`}>
-                          {RELATION_STYLE[r.relation].icon} {cap(hud.nations[r.id].name)}
+            {hud.nations
+              .filter((n) => n.alive)
+              .map((n) => (
+                <li key={n.id}>
+                  <button
+                    onClick={() => {
+                      setSel(n.id);
+                      const face = sim.nationHome(n.id);
+                      if (face != null) setFocus({ face, key: Date.now() });
+                    }}
+                    className={`w-full rounded-lg px-2 py-1.5 text-left text-sm transition ${sel === n.id ? "bg-white/15" : "hover:bg-white/5"} ${n.alive ? "" : "opacity-40"}`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="h-2.5 w-2.5 shrink-0 rounded-full"
+                        style={{ background: n.color }}
+                      />
+                      <span title={RACE[n.race].name}>{RACE[n.race].icon}</span>
+                      <span className="flex-1 truncate font-medium">
+                        {cap(n.name)}
+                      </span>
+                      <span className="text-xs tabular-nums text-white/50">
+                        {n.alive ? n.population : "fallen"}
+                      </span>
+                    </div>
+                    <div className="ml-4.5 flex flex-wrap gap-x-2 text-xs">
+                      {n.alive && (
+                        <span className="text-amber-200/70">{ERAS[n.era]}</span>
+                      )}
+                      {!!n.ships && (
+                        <span
+                          className="text-sky-200/80"
+                          title={`Navy: ${n.ships} warship${n.ships === 1 ? "" : "s"}`}
+                        >
+                          ⚓ {n.ships}
                         </span>
-                      ))}
-                  </div>
-                </button>
-              </li>
-            ))}
+                      )}
+                      {n.crisis && (
+                        <span className="font-semibold uppercase text-rose-300">
+                          {n.crisis}
+                        </span>
+                      )}
+                      {n.relations
+                        .filter((r) => n.alive && r.relation !== "peace")
+                        .map((r) => (
+                          <span
+                            key={r.id}
+                            className={RELATION_STYLE[r.relation].cls}
+                            title={`${RELATION_STYLE[r.relation].label}, tension ${r.tension}`}
+                          >
+                            {RELATION_STYLE[r.relation].icon}{" "}
+                            {cap(hud.nations[r.id].name)}
+                          </span>
+                        ))}
+                    </div>
+                  </button>
+                </li>
+              ))}
           </ul>
         </div>
         <div className="mt-auto flex flex-wrap items-end justify-center gap-2 whitespace-nowrap">
           {onNewPlanet && (
             <button
-              onClick={() => (demo || confirm("Start over on a new planet? This planet will be lost.")) && onNewPlanet()}
+              onClick={() =>
+                (demo ||
+                  confirm(
+                    "Start over on a new planet? This planet will be lost.",
+                  )) &&
+                onNewPlanet()
+              }
               className="rounded-lg bg-white/5 px-2.5 py-1 text-xs text-white/60 transition hover:bg-white/10 hover:text-white"
-              title={demo ? "Leave the demo and go back to your own planet" : "Your planet saves automatically in this browser"}
+              title={
+                demo
+                  ? "Leave the demo and go back to your own planet"
+                  : "Your planet saves automatically in this browser"
+              }
             >
               {demo ? "Exit demo" : "New planet"}
             </button>
@@ -531,19 +805,117 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
             {muted ? "🔇" : "🔊"}
           </button>
         </div>
-        {!awake && <p className="text-xs text-white/55">Your nations are wandering. When each founds a village it will become aware of you. Once they worship you, you earn devotion to spend on miracles.</p>}
+        {!awake && (
+          <p className="text-xs text-white/55">
+            Your nations are wandering. When each founds a village it will
+            become aware of you. Once they worship you, you earn devotion to
+            spend on miracles.
+          </p>
+        )}
       </aside>
+
+      <div ref={resourcesPanelRef} className="glass absolute left-[17.5rem] top-4 z-20 w-72 p-3">
+        <div className="mb-2 flex items-center justify-between">
+          <p className="label">Resources</p>
+          <span className="text-[10px] text-white/40">
+            spend to improve your world
+          </span>
+        </div>
+        <div className="grid grid-cols-3 gap-2 text-center">
+          <Stock
+            align="left"
+            icon="🌾"
+            label="Food"
+            info="Harvested by well-fed people from the land around their homes."
+            value={stats.resources.food}
+          />
+          <Stock
+            icon="🪵"
+            label="Wood"
+            info="Cut from forests around towns."
+            value={stats.resources.wood}
+          />
+          <Stock
+            align="right"
+            icon="🪨"
+            label="Stone"
+            info="Quarried from rocky mountainsides."
+            value={stats.resources.stone}
+          />
+          <Stock
+            align="left"
+            icon="⚙️"
+            label="Metal"
+            info="Mined from ore in the mountains."
+            value={stats.resources.metal}
+          />
+          <Stock
+            icon="🪙"
+            label="Gold"
+            info="Mined at gold deposits."
+            value={stats.resources.gold}
+          />
+          <Stock
+            align="right"
+            icon="🌿"
+            label="Herbs"
+            info="Medicinal plants gathered in forests."
+            value={stats.resources.herbs}
+          />
+        </div>
+        <button
+          onClick={() => setUpgradesOpen((open) => !open)}
+          className={`mt-3 flex w-full items-center justify-between border-t border-white/10 pt-2 text-left text-xs font-semibold transition hover:text-white ${upgradesOpen ? "text-amber-100" : "text-sky-200/90"} ${availableUpgrades ? "upgrade-ready" : ""}`}
+          aria-expanded={upgradesOpen}
+          title="Spend resources on permanent upgrades"
+        >
+          <span className="flex items-center gap-2">
+            <span
+              className={`transition-transform ${upgradesOpen ? "rotate-90" : ""}`}
+            >
+              ›
+            </span>
+            <span>Upgrades</span>
+            {availableUpgrades > 0 && (
+              <span
+                className="h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_8px_rgba(110,231,183,0.9)]"
+                aria-label={`${availableUpgrades} upgrades available`}
+              />
+            )}
+          </span>
+          <span className="text-[10px] uppercase tracking-wider text-white/40">
+            {upgradesOpen ? "Hide" : "View"}
+          </span>
+        </button>
+      </div>
+      {upgradesOpen && (
+        <div ref={upgradesMenuRef}>
+          <UpgradeMenu
+            sim={sim}
+            resources={stats.resources}
+            onUpgrade={() => setHud(readHud(sim))}
+          />
+        </div>
+      )}
 
       {/* Pop-up: what is happening on the planet right now (disasters, weather, fate) */}
       {hud.alert && hud.year - hud.alert.at < 7 && (
         <div className="pointer-events-none absolute top-4 left-[17.5rem] right-[19.5rem] flex justify-center">
-          <div key={hud.alert.at} className="glass alert-pop pointer-events-auto flex max-w-lg items-center gap-3 px-5 py-3">
+          <div
+            key={hud.alert.at}
+            className="glass alert-pop pointer-events-auto flex max-w-lg items-center gap-3 px-5 py-3"
+          >
             <span className="text-3xl leading-none">{hud.alert.icon}</span>
             <div className="min-w-0">
               <div className="text-base font-bold">{hud.alert.title}</div>
               <div className="text-sm text-white/75">{hud.alert.text}</div>
             </div>
-            <button onClick={() => setFocus({ face: hud.alert!.face, key: Date.now() })} className="ml-2 shrink-0 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold transition hover:bg-white/20">
+            <button
+              onClick={() =>
+                setFocus({ face: hud.alert!.face, key: Date.now() })
+              }
+              className="ml-2 shrink-0 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold transition hover:bg-white/20"
+            >
               Show me
             </button>
           </div>
@@ -562,14 +934,22 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
               sim.decide(yes);
               setHud(readHud(sim));
             }}
-            onShow={() => setFocus({ face: hud.god.choice!.face, key: Date.now() })}
+            onShow={() =>
+              setFocus({ face: hud.god.choice!.face, key: Date.now() })
+            }
           />
         )}
         {hud.god.prayers.slice(-3).map((p) => (
-          <div key={p.id} className="glass pointer-events-auto relative flex w-[30rem] max-w-full items-center gap-3 overflow-hidden px-4 py-2.5 text-sm">
+          <div
+            key={p.id}
+            className="glass pointer-events-auto relative flex w-[30rem] max-w-full items-center gap-3 overflow-hidden px-4 py-2.5 text-sm"
+          >
             <span className="text-xl">🙏</span>
             <span className="flex-1">{cap(p.text)}</span>
-            <Countdown left={PRAYER_LIFE - (hud.year - p.at) / sim.pace} life={PRAYER_LIFE} />
+            <Countdown
+              left={PRAYER_LIFE - (hud.year - p.at) / sim.pace}
+              life={PRAYER_LIFE}
+            />
             <button
               disabled={hud.god.devotion < p.cost}
               onClick={() => {
@@ -605,25 +985,50 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
               >
                 <div className="text-lg leading-none">{m.icon}</div>
                 <div className="mt-0.5 text-[11px] font-semibold">{m.name}</div>
-                <div className="text-[10px] text-amber-200/80">{wait > 0 ? `ready in ${wait}s` : `✨ ${m.cost}`}</div>
+                <div className="text-[10px] text-amber-200/80">
+                  {wait > 0 ? `ready in ${wait}s` : `✨ ${m.cost}`}
+                </div>
               </button>
             );
           })}
         </div>
-        <p className="text-xs text-white/40">{miracle ? "Click the land to cast · Esc to cancel" : "Drag to rotate · scroll to zoom · pick a miracle, then click the land"}</p>
+        <p className="text-xs text-white/40">
+          {miracle
+            ? "Click the land to cast · Esc to cancel"
+            : "Drag to rotate · scroll to zoom · pick a miracle, then click the land"}
+        </p>
       </div>
 
       {talkTo != null && hud.nations[talkTo] && (
-        <LeaderDialog nation={hud.nations[talkTo]} civ={civs[talkTo]} chat={leaderChats[talkTo]} mood={moods[talkTo]} busy={leaderBusy} onSay={sayToLeader} onClose={() => setTalkTo(null)} />
+        <LeaderDialog
+          nation={hud.nations[talkTo]}
+          civ={civs[talkTo]}
+          chat={leaderChats[talkTo]}
+          mood={moods[talkTo]}
+          busy={leaderBusy}
+          onSay={sayToLeader}
+          onClose={() => setTalkTo(null)}
+        />
       )}
 
-      {hover && hud.nations[hover.id] && <NationCard n={hud.nations[hover.id]} civ={civs[hover.id]} all={hud.nations} x={hover.x} y={hover.y} />}
+      {hover && hud.nations[hover.id] && (
+        <NationCard
+          n={hud.nations[hover.id]}
+          civ={civs[hover.id]}
+          all={hud.nations}
+          x={hover.x}
+          y={hover.y}
+        />
+      )}
 
       {/* The chosen nation's mind */}
       <aside className="glass absolute bottom-4 right-4 top-4 flex w-72 flex-col p-4">
         <div className="mb-3 space-y-2 border-b border-white/10 pb-3 text-sm">
           <div className="flex items-center gap-2">
-            <span className="h-3 w-3 rounded-full" style={{ background: me.color }} />
+            <span
+              className="h-3 w-3 rounded-full"
+              style={{ background: me.color }}
+            />
             <p className="text-lg font-semibold">{cap(me.name)}</p>
           </div>
           <button
@@ -633,7 +1038,13 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
             title="Hold an audience with their leader"
           >
             <span className="shrink-0 overflow-hidden rounded-lg">
-              <Portrait race={me.race} seed={me.leader.seed} color={me.color} mood={moods[sel]} size={52} />
+              <Portrait
+                race={me.race}
+                seed={me.leader.seed}
+                color={me.color}
+                mood={moods[sel]}
+                size={52}
+              />
             </span>
             <span className="min-w-0">
               <span className="block truncate text-sm font-semibold">
@@ -642,59 +1053,119 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
               <span className="block text-xs text-white/55">
                 {RACE[me.race].icon} {RACE[me.race].name} · {ERAS[me.era]}
               </span>
-              <span className="block text-xs text-sky-300">🗣️ Talk to the leader</span>
+              <span className="block text-xs text-sky-300">
+                🗣️ Talk to the leader
+              </span>
             </span>
           </button>
           <NeedBars needs={me.needs} crisis={me.crisis} love={me.love} />
           {civ ? (
             <>
               <p>
-                <span className="label">Focus</span> <span className={me.policy === "rebel" ? "font-semibold text-rose-300" : "font-semibold"}>{POLICY_LABEL[me.policy]}</span>
-                {reasons[sel] && <span className="block text-xs text-white/50">{reasons[sel]}</span>}
+                <span className="label">Focus</span>{" "}
+                <span
+                  className={
+                    me.policy === "rebel"
+                      ? "font-semibold text-rose-300"
+                      : "font-semibold"
+                  }
+                >
+                  {POLICY_LABEL[me.policy]}
+                </span>
+                {reasons[sel] && (
+                  <span className="block text-xs text-white/50">
+                    {reasons[sel]}
+                  </span>
+                )}
               </p>
               <p>
                 <span className="label">Faith</span> {civ.religion.name}
               </p>
               <p className="text-white/70">
-                They call you <b>{civ.religion.godName}</b>. {civ.religion.belief}
+                They call you <b>{civ.religion.godName}</b>.{" "}
+                {civ.religion.belief}
               </p>
               <p>
-                <span className="label">They feel</span> <span className={civ.attitude === "hostile" || civ.attitude === "resentful" ? "text-rose-300" : ""}>{civ.attitude}</span>
+                <span className="label">They feel</span>{" "}
+                <span
+                  className={
+                    civ.attitude === "hostile" || civ.attitude === "resentful"
+                      ? "text-rose-300"
+                      : ""
+                  }
+                >
+                  {civ.attitude}
+                </span>
               </p>
             </>
           ) : (
-            <p className="text-white/50">{me.alive ? "They do not know you yet." : "This nation is gone."}</p>
+            <p className="text-white/50">
+              {me.alive ? "They do not know you yet." : "This nation is gone."}
+            </p>
           )}
         </div>
 
-        <p className="label mb-2">Voice of {civ ? civ.demonym : "the people"} {busy === "thinking" && <span className="animate-pulse">· thinking…</span>}</p>
+        <p className="label mb-2">
+          Voice of {civ ? civ.demonym : "the people"}{" "}
+          {busy === "thinking" && (
+            <span className="animate-pulse">· thinking…</span>
+          )}
+        </p>
         <ol className="mb-2 max-h-[28%] space-y-2 overflow-y-auto text-sm">
           {chat.map((m, i) => (
-            <li key={i} className={m.from === "god" ? "text-right text-sky-200" : "italic text-amber-100"}>
+            <li
+              key={i}
+              className={
+                m.from === "god"
+                  ? "text-right text-sky-200"
+                  : "italic text-amber-100"
+              }
+            >
               {m.text}
             </li>
           ))}
-          {!chat.length && <li className="text-white/40">{civ ? "They will speak to you soon." : "…"}</li>}
+          {!chat.length && (
+            <li className="text-white/40">
+              {civ ? "They will speak to you soon." : "…"}
+            </li>
+          )}
         </ol>
         <form onSubmit={speak} className="mb-4 flex gap-2">
           <input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             disabled={!civ || !me.alive}
-            placeholder={civ ? `Speak to ${civ.demonym}…` : "No one to hear you yet"}
+            placeholder={
+              civ ? `Speak to ${civ.demonym}…` : "No one to hear you yet"
+            }
             className="min-w-0 flex-1 rounded-lg bg-white/10 px-3 py-1.5 text-sm outline-none placeholder:text-white/30 focus:bg-white/15"
           />
-          <button disabled={!civ || !draft.trim()} className="rounded-lg bg-sky-400/20 px-3 text-sm disabled:opacity-30">
+          <button
+            disabled={!civ || !draft.trim()}
+            className="rounded-lg bg-sky-400/20 px-3 text-sm disabled:opacity-30"
+          >
             Speak
           </button>
         </form>
 
-        <p className="label mb-2">Chronicle {busy === "narrating" && <span className="animate-pulse">· writing…</span>}</p>
+        <p className="label mb-2">
+          Chronicle{" "}
+          {busy === "narrating" && (
+            <span className="animate-pulse">· writing…</span>
+          )}
+        </p>
         <ol className="flex-1 space-y-3 overflow-y-auto text-sm">
           {[...chronicle].reverse().map((c, i) => (
             <li key={chronicle.length - i}>
-              {c.nation != null && <span className="mr-1.5 inline-block h-2 w-2 rounded-full" style={{ background: sim.nations[c.nation].color }} />}
-              <span className="text-white/40">Year {Math.floor(c.year)} · </span>
+              {c.nation != null && (
+                <span
+                  className="mr-1.5 inline-block h-2 w-2 rounded-full"
+                  style={{ background: sim.nations[c.nation].color }}
+                />
+              )}
+              <span className="text-white/40">
+                Year {Math.floor(c.year)} ·{" "}
+              </span>
               {c.text}
             </li>
           ))}
@@ -707,7 +1178,10 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
             <h2 className="mt-3 text-2xl font-bold">{hud.god.outcome.title}</h2>
             <p className="mt-2 text-sm text-white/75">{hud.god.outcome.text}</p>
             <div className="mt-5 flex justify-center gap-2">
-              <button onClick={() => setSeenOutcome(true)} className="rounded-lg bg-white/10 px-4 py-2 text-sm font-semibold hover:bg-white/20">
+              <button
+                onClick={() => setSeenOutcome(true)}
+                className="rounded-lg bg-white/10 px-4 py-2 text-sm font-semibold hover:bg-white/20"
+              >
                 Keep watching
               </button>
               <button onClick={() => (onNewPlanet ? onNewPlanet() : location.reload())} className="rounded-lg bg-sky-400/30 px-4 py-2 text-sm font-semibold hover:bg-sky-400/40">
@@ -726,60 +1200,241 @@ export default function Game({ playerName, planetName = "Arda", race, worldType,
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
 
 function readHud(sim: PlanetSim): Hud {
-  return { year: sim.year, stats: sim.stats(), needs: sim.needs(), nations: sim.nationInfo(), fate: sim.fate, alert: sim.alert, output: Math.round(sim.output), military: sim.military(),
-    god: { devotion: sim.devotion, ready: { ...sim.ready }, prayers: [...sim.prayers], spacefaring: sim.spacefaring, choice: sim.choice, outcome: sim.outcome, avgLove: sim.avgLove() } };
+  return {
+    year: sim.year,
+    stats: sim.stats(),
+    needs: sim.needs(),
+    nations: sim.nationInfo(),
+    fate: sim.fate,
+    alert: sim.alert,
+    output: Math.round(sim.output),
+    military: sim.military(),
+    god: {
+      devotion: sim.devotion,
+      ready: { ...sim.ready },
+      prayers: [...sim.prayers],
+      spacefaring: sim.spacefaring,
+      choice: sim.choice,
+      outcome: sim.outcome,
+      avgLove: sim.avgLove(),
+    },
+  };
 }
 
 // Calls an LLM route. If the server can't be reached (for example the static demo build,
 // which has no API routes), answer with the same canned fallbacks the server would use.
 async function post<T>(url: string, body: unknown): Promise<T> {
   try {
-    const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
     if (!res.ok) throw new Error(`${url} ${res.status}`);
     return await res.json();
   } catch {
-    return offline(url, body as { world: World; kind?: ChronicleKind; detail?: string; chat?: MindMessage[] }) as T;
+    return offline(
+      url,
+      body as {
+        world: World;
+        kind?: ChronicleKind;
+        detail?: string;
+        chat?: MindMessage[];
+      },
+    ) as T;
   }
 }
 
-function offline(url: string, { world, kind, chat = [] }: { world: World; kind?: ChronicleKind; chat?: MindMessage[] }) {
-  if (url === "/api/leader") return fallbackLeader(world, chat as unknown as LeaderMessage[]);
+function offline(
+  url: string,
+  {
+    world,
+    kind,
+    chat = [],
+  }: { world: World; kind?: ChronicleKind; chat?: MindMessage[] },
+) {
+  if (url === "/api/leader")
+    return fallbackLeader(world, chat as unknown as LeaderMessage[]);
   if (url === "/api/mind") {
     const t = fallbackThought(world, chat);
-    return { civ: { ...world.civ, attitude: t.attitude }, reply: t.reply, policy: t.policy, reason: t.reason, toward: t.toward ?? null };
+    return {
+      civ: { ...world.civ, attitude: t.attitude },
+      reply: t.reply,
+      policy: t.policy,
+      reason: t.reason,
+      toward: t.toward ?? null,
+    };
   }
   if (kind === "genesis" || !world.civ) {
     const c = fallbackCiv(world.nation?.id);
-    return { civ: c, entry: { year: world.year, kind: "genesis", text: `${cap(c.demonym)} light their first fires and call themselves ${c.name}.` } };
+    return {
+      civ: c,
+      entry: {
+        year: world.year,
+        kind: "genesis",
+        text: `${cap(c.demonym)} light their first fires and call themselves ${c.name}.`,
+      },
+    };
   }
   const r = fallbackReaction(world, kind ?? "milestone");
-  return { civ: { ...world.civ, attitude: r.attitude }, entry: { year: world.year, kind, text: r.text } };
+  return {
+    civ: { ...world.civ, attitude: r.attitude },
+    entry: { year: world.year, kind, text: r.text },
+  };
+}
+
+function UpgradeMenu({
+  sim,
+  resources,
+  onUpgrade,
+}: {
+  sim: PlanetSim;
+  resources: Resources;
+  onUpgrade: () => void;
+}) {
+  const resourceIcons: Record<keyof Resources, string> = {
+    food: "🌾",
+    wood: "🪵",
+    stone: "🪨",
+    metal: "⚙️",
+    gold: "🪙",
+    herbs: "🌿",
+  };
+  return (
+    <section
+      className="glass absolute left-[17.5rem] top-[14.5rem] z-30 w-96 max-w-[calc(100vw-20rem)] p-4 shadow-2xl"
+      aria-label="World upgrades"
+    >
+      <div className="mb-3 flex items-start justify-between border-b border-white/10 pb-3">
+        <div>
+          <p className="text-lg font-bold">World upgrades</p>
+          <p className="text-xs text-white/55">
+            Invest your stockpile to shape the planet’s future.
+          </p>
+        </div>
+        <span className="rounded-full bg-amber-300/15 px-2 py-1 text-[10px] font-semibold text-amber-200">
+          PERMANENT
+        </span>
+      </div>
+      <div className="space-y-2">
+        {UPGRADES.map((upgrade) => {
+          const level = sim.upgrades[upgrade.id];
+          const cost = upgrade.costs[level];
+          const affordable =
+            !!cost &&
+            Object.entries(cost).every(
+              ([resource, amount]) =>
+                resources[resource as keyof Resources] >= amount,
+            );
+          return (
+            <div
+              key={upgrade.id}
+              className={`rounded-xl border p-3 transition ${affordable ? "border-emerald-300/40 bg-emerald-300/10" : "border-white/10 bg-white/5"}`}
+            >
+              <div className="flex items-start gap-2">
+                <span className="text-xl">{upgrade.icon}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-semibold">{upgrade.name}</p>
+                    <span className="text-[11px] text-white/50">
+                      Lv {level}/{upgrade.max}
+                    </span>
+                  </div>
+                  <p className="mt-0.5 text-xs text-white/60">
+                    {upgrade.description}
+                  </p>
+                  {cost ? (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {Object.entries(cost).map(([resource, amount]) => (
+                        <span
+                          key={resource}
+                          className={`rounded bg-black/20 px-1.5 py-0.5 text-[11px] tabular-nums ${resources[resource as keyof Resources] >= amount ? "text-emerald-200" : "text-rose-300"}`}
+                        >
+                          {resourceIcons[resource as keyof Resources]} {amount}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-amber-200/70">
+                      Fully upgraded
+                    </p>
+                  )}
+                </div>
+                {cost && (
+                  <button
+                    disabled={!affordable}
+                    onClick={() => {
+                      if (sim.purchaseUpgrade(upgrade.id)) onUpgrade();
+                    }}
+                    className="shrink-0 rounded-lg bg-emerald-300/20 px-2.5 py-1.5 text-xs font-bold text-emerald-100 transition hover:bg-emerald-300/35 disabled:cursor-not-allowed disabled:opacity-35"
+                  >
+                    Upgrade
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
 }
 
 // The card that follows the mouse when hovering over a nation on the globe.
-function NationCard({ n, civ, all, x, y }: { n: NationInfo; civ: Civ | null; all: NationInfo[]; x: number; y: number }) {
+function NationCard({
+  n,
+  civ,
+  all,
+  x,
+  y,
+}: {
+  n: NationInfo;
+  civ: Civ | null;
+  all: NationInfo[];
+  x: number;
+  y: number;
+}) {
   const left = Math.min(x + 16, window.innerWidth - 260);
   const top = Math.min(y + 16, window.innerHeight - 260);
   return (
-    <div className="glass pointer-events-none fixed z-10 w-60 space-y-2 p-3 text-sm" style={{ left, top }}>
+    <div
+      className="glass pointer-events-none fixed z-10 w-60 space-y-2 p-3 text-sm"
+      style={{ left, top }}
+    >
       <div className="flex items-center gap-2">
-        <span className="h-3 w-3 rounded-full" style={{ background: n.color }} />
+        <span
+          className="h-3 w-3 rounded-full"
+          style={{ background: n.color }}
+        />
         <p className="font-semibold">{cap(n.name)}</p>
-        {n.crisis && <span className="ml-auto text-xs font-semibold uppercase text-rose-300">{n.crisis}</span>}
+        {n.crisis && (
+          <span className="ml-auto text-xs font-semibold uppercase text-rose-300">
+            {n.crisis}
+          </span>
+        )}
       </div>
       <p className="text-xs text-white/60">
-        {RACE[n.race].icon} {RACE[n.race].name} · {ERAS[n.era]} · led by {n.leader.title} {n.leader.name}
+        {RACE[n.race].icon} {RACE[n.race].name} · {ERAS[n.era]} · led by{" "}
+        {n.leader.title} {n.leader.name}
       </p>
-      {civ && <p className="text-xs text-white/60">{cap(civ.demonym)} · worship {civ.religion.godName} ({civ.religion.name}) · feel {civ.attitude}</p>}
+      {civ && (
+        <p className="text-xs text-white/60">
+          {cap(civ.demonym)} · worship {civ.religion.godName} (
+          {civ.religion.name}) · feel {civ.attitude}
+        </p>
+      )}
       <p className="text-xs text-white/70">
-        {n.alive ? `${n.population} people · ${n.villages} ${n.villages === 1 ? "village" : "villages"} · ${POLICY_LABEL[n.policy].toLowerCase()}` : "Fallen"}
+        {n.alive
+          ? `${n.population} people · ${n.villages} ${n.villages === 1 ? "village" : "villages"} · ${POLICY_LABEL[n.policy].toLowerCase()}`
+          : "Fallen"}
       </p>
       <NeedBars needs={n.needs} crisis={null} />
       {n.relations.length > 0 && (
         <div className="flex flex-wrap gap-x-2 text-xs">
           {n.relations.map((r) => (
             <span key={r.id} className={RELATION_STYLE[r.relation].cls}>
-              {RELATION_STYLE[r.relation].icon} {RELATION_STYLE[r.relation].label} with {cap(all[r.id].name)}
+              {RELATION_STYLE[r.relation].icon}{" "}
+              {RELATION_STYLE[r.relation].label} with {cap(all[r.id].name)}
             </span>
           ))}
         </div>
@@ -790,13 +1445,36 @@ function NationCard({ n, civ, all, x, y }: { n: NationInfo; civ: Civ | null; all
 
 // One resource tile; hovering shows what it is and where it comes from.
 // The tooltip lines up with the tile's outer edge in the side columns, so it never runs off the panel.
-const TIP_ALIGN = { left: "left-0", center: "left-1/2 -translate-x-1/2", right: "right-0" };
-function Stock({ icon, label, info, value, align = "center" }: { icon: string; label: string; info: string; value: number; align?: keyof typeof TIP_ALIGN }) {
+const TIP_ALIGN = {
+  left: "left-0",
+  center: "left-1/2 -translate-x-1/2",
+  right: "right-0",
+};
+function Stock({
+  icon,
+  label,
+  info,
+  value,
+  align = "center",
+}: {
+  icon: string;
+  label: string;
+  info: string;
+  value: number;
+  align?: keyof typeof TIP_ALIGN;
+}) {
   return (
-    <div className="group relative cursor-help rounded-lg bg-white/5 py-1.5" aria-label={`${label}: ${info}`}>
+    <div
+      className="group relative cursor-help rounded-lg bg-white/5 py-1.5"
+      aria-label={`${label}: ${info}`}
+    >
       <div>{icon}</div>
-      <div className="text-sm font-semibold tabular-nums">{value.toLocaleString()}</div>
-      <div className={`pointer-events-none absolute top-full z-50 mt-1.5 w-44 ${TIP_ALIGN[align]} rounded-lg border border-white/15 bg-[#0d1424] px-2.5 py-2 text-left opacity-0 shadow-xl transition-opacity group-hover:opacity-100`}>
+      <div className="text-sm font-semibold tabular-nums">
+        {value.toLocaleString()}
+      </div>
+      <div
+        className={`pointer-events-none absolute top-full z-50 mt-1.5 w-44 ${TIP_ALIGN[align]} rounded-lg border border-white/15 bg-[#0d1424] px-2.5 py-2 text-left opacity-0 shadow-xl transition-opacity group-hover:opacity-100`}
+      >
         <p className="text-xs font-semibold">
           {icon} {label}
         </p>
@@ -806,7 +1484,15 @@ function Stock({ icon, label, info, value, align = "center" }: { icon: string; l
   );
 }
 
-function NeedBars({ needs, crisis, love }: { needs: Needs; crisis: Crisis | null; love?: number }) {
+function NeedBars({
+  needs,
+  crisis,
+  love,
+}: {
+  needs: Needs;
+  crisis: Crisis | null;
+  love?: number;
+}) {
   const bars: [string, number][] = [
     ["Food", needs.food],
     ["Stability", needs.stability],
@@ -821,15 +1507,21 @@ function NeedBars({ needs, crisis, love }: { needs: Needs; crisis: Crisis | null
             <span className="tabular-nums">{Math.round(v)}</span>
           </div>
           <div className="h-1.5 rounded-full bg-white/10">
-            <div className={`h-full rounded-full transition-all ${v < 25 ? "bg-rose-400" : "bg-sky-300"}`} style={{ width: `${Math.max(0, Math.min(100, v))}%` }} />
+            <div
+              className={`h-full rounded-full transition-all ${v < 25 ? "bg-rose-400" : "bg-sky-300"}`}
+              style={{ width: `${Math.max(0, Math.min(100, v))}%` }}
+            />
           </div>
         </div>
       ))}
-      {crisis && <p className="text-sm font-semibold uppercase tracking-wide text-rose-300">{crisis}</p>}
+      {crisis && (
+        <p className="text-sm font-semibold uppercase tracking-wide text-rose-300">
+          {crisis}
+        </p>
+      )}
     </div>
   );
 }
-
 
 // The goal, and how close the god is to it.
 function Goal({ hud }: { hud: Hud }) {
@@ -837,19 +1529,36 @@ function Goal({ hud }: { hud: Hud }) {
   const year = Math.floor(hud.year / SECONDS_PER_YEAR);
   const love = Math.round(hud.god.avgLove);
   return (
-    <div className="mb-2 rounded-lg border border-white/10 px-2.5 py-2 text-xs" title="Lose if your people fall, or if every nation comes to hate you.">
+    <div
+      className="mb-2 rounded-lg border border-white/10 px-2.5 py-2 text-xs"
+      title="Lose if your people fall, or if every nation comes to hate you."
+    >
       <p className="text-[10px] uppercase tracking-wider text-white/50">Goal</p>
       <p className="text-white/80">
-        Keep {mine ? cap(mine.name) : "your people"} alive to Year {GOAL_YEAR}, loved by the nations.
+        Keep {mine ? cap(mine.name) : "your people"} alive to Year {GOAL_YEAR},
+        loved by the nations.
       </p>
       <div className="mt-1.5 flex justify-between text-white/60">
         <span>
           Year {Math.min(year, GOAL_YEAR)}/{GOAL_YEAR}
         </span>
-        <span className={love >= 50 ? "text-emerald-300" : love < 25 ? "text-rose-300" : "text-amber-200"}>Love {love}/50</span>
+        <span
+          className={
+            love >= 50
+              ? "text-emerald-300"
+              : love < 25
+                ? "text-rose-300"
+                : "text-amber-200"
+          }
+        >
+          Love {love}/50
+        </span>
       </div>
       <div className="mt-1 h-1 overflow-hidden rounded-full bg-white/10">
-        <div className="h-full bg-sky-300" style={{ width: `${Math.min(100, (year / GOAL_YEAR) * 100)}%` }} />
+        <div
+          className="h-full bg-sky-300"
+          style={{ width: `${Math.min(100, (year / GOAL_YEAR) * 100)}%` }}
+        />
       </div>
     </div>
   );
@@ -858,38 +1567,77 @@ function Goal({ hud }: { hud: Hud }) {
 // A disaster, war or revolution has begun: step in (for devotion) or let fate decide.
 // Seconds left to answer, as a number plus a bar along the card's bottom edge that drains and turns red near the end.
 function Countdown({ left, life }: { left: number; life: number }) {
-  const s = Math.max(0, Math.ceil(left)), urgent = s <= 5;
+  const s = Math.max(0, Math.ceil(left)),
+    urgent = s <= 5;
   return (
     <>
-      <span className={`w-8 text-right text-xs tabular-nums ${urgent ? "font-bold text-red-400" : "text-white/50"}`} title="Seconds left to decide">
+      <span
+        className={`w-8 text-right text-xs tabular-nums ${urgent ? "font-bold text-red-400" : "text-white/50"}`}
+        title="Seconds left to decide"
+      >
         {s}s
       </span>
       <span className="absolute inset-x-0 bottom-0 h-0.5 bg-white/5">
-        <span className={`block h-full transition-[width] duration-300 ease-linear ${urgent ? "bg-red-400" : "bg-amber-300/70"}`} style={{ width: `${Math.max(0, Math.min(1, left / life)) * 100}%` }} />
+        <span
+          className={`block h-full transition-[width] duration-300 ease-linear ${urgent ? "bg-red-400" : "bg-amber-300/70"}`}
+          style={{ width: `${Math.max(0, Math.min(1, left / life)) * 100}%` }}
+        />
       </span>
     </>
   );
 }
 
-function ChoiceCard({ choice, left, devotion, names, onPick, onShow }: { choice: NonNullable<Hud["god"]["choice"]>; left: number; devotion: number; names: NationInfo[]; onPick: (intervene: boolean) => void; onShow: () => void }) {
-  const what = { disaster: "Turn it aside", war: "Force a peace", revolution: "Calm the people" }[choice.kind];
-  const who = choice.nations.map((n) => names[n]?.name).filter(Boolean).map((n) => cap(n!)).join(" and ");
+function ChoiceCard({
+  choice,
+  left,
+  devotion,
+  names,
+  onPick,
+  onShow,
+}: {
+  choice: NonNullable<Hud["god"]["choice"]>;
+  left: number;
+  devotion: number;
+  names: NationInfo[];
+  onPick: (intervene: boolean) => void;
+  onShow: () => void;
+}) {
+  const what = {
+    disaster: "Turn it aside",
+    war: "Force a peace",
+    revolution: "Calm the people",
+  }[choice.kind];
+  const who = choice.nations
+    .map((n) => names[n]?.name)
+    .filter(Boolean)
+    .map((n) => cap(n!))
+    .join(" and ");
   return (
     <div className="glass alert-pop pointer-events-auto relative w-[30rem] max-w-full overflow-hidden px-4 py-3">
       <div className="flex items-center gap-2">
         <span className="text-base font-bold">{choice.title}</span>
         <span className="text-xs text-white/50">{who}</span>
-        <button onClick={onShow} className="ml-auto text-xs text-sky-300 hover:underline">
+        <button
+          onClick={onShow}
+          className="ml-auto text-xs text-sky-300 hover:underline"
+        >
           Show me
         </button>
         <Countdown left={left} life={CHOICE_LIFE} />
       </div>
       <p className="mt-0.5 text-sm text-white/75">{choice.text}</p>
       <div className="mt-2 flex gap-2">
-        <button disabled={devotion < choice.cost} onClick={() => onPick(true)} className="flex-1 rounded-lg bg-amber-300/20 px-3 py-1.5 text-sm font-semibold transition hover:bg-amber-300/30 disabled:opacity-40">
+        <button
+          disabled={devotion < choice.cost}
+          onClick={() => onPick(true)}
+          className="flex-1 rounded-lg bg-amber-300/20 px-3 py-1.5 text-sm font-semibold transition hover:bg-amber-300/30 disabled:opacity-40"
+        >
           {what} ✨{choice.cost}
         </button>
-        <button onClick={() => onPick(false)} className="flex-1 rounded-lg bg-white/5 px-3 py-1.5 text-sm transition hover:bg-white/10">
+        <button
+          onClick={() => onPick(false)}
+          className="flex-1 rounded-lg bg-white/5 px-3 py-1.5 text-sm transition hover:bg-white/10"
+        >
           Let fate decide
         </button>
       </div>
