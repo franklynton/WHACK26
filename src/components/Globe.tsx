@@ -34,7 +34,7 @@ const LAND_HEIGHT = 0.07; // how far mountains stand out from the sea
 const PAINT_EVERY_MS = 70;
 const ONE_SHOT: Tool[] = ["spawn", "meteor"];
 
-function PlanetMesh({ sim, tool, onPaint }: { sim: PlanetSim; tool: Tool; onPaint: (power: GodPower, face: number) => void }) {
+function PlanetMesh({ sim, tool, onPaint, onHover }: { sim: PlanetSim; tool: Tool; onPaint: (power: GodPower, face: number) => void; onHover?: (face: number | null, x: number, y: number) => void }) {
   const geometry = useMemo(() => {
     const g = sim.geometry.clone();
     g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(g.getAttribute("position").count * 3), 3));
@@ -120,7 +120,11 @@ function PlanetMesh({ sim, tool, onPaint }: { sim: PlanetSim; tool: Tool; onPain
         painting.current = true;
         paint(e, true);
       }}
-      onPointerMove={(e) => painting.current && paint(e, false)}
+      onPointerMove={(e) => {
+        if (painting.current) paint(e, false);
+        onHover?.(e.faceIndex ?? null, e.nativeEvent.clientX, e.nativeEvent.clientY);
+      }}
+      onPointerOut={() => onHover?.(null, 0, 0)}
     >
       <meshStandardMaterial vertexColors flatShading roughness={0.95} />
     </mesh>
@@ -249,6 +253,31 @@ function FaceStart({ sim }: { sim: PlanetSim }) {
   return null;
 }
 
+// Flies the camera to a tile when `focus` changes (clicking a nation in the HUD).
+function FlyTo({ sim, focus }: { sim: PlanetSim; focus?: { face: number; key: number } | null }) {
+  const camera = useThree((s) => s.camera);
+  const anim = useRef<{ from: THREE.Vector3; to: THREE.Vector3; t: number } | null>(null);
+  useEffect(() => {
+    if (!focus) return;
+    const f = focus.face;
+    const dist = Math.min(camera.position.length(), 2.4);
+    const to = new THREE.Vector3(sim.centroids[f * 3], sim.centroids[f * 3 + 1], sim.centroids[f * 3 + 2]).setLength(dist);
+    anim.current = { from: camera.position.clone(), to, t: 0 };
+  }, [focus, sim, camera]);
+  useFrame((_, dt) => {
+    const a = anim.current;
+    if (!a) return;
+    a.t = Math.min(1, a.t + dt / 0.9);
+    const k = a.t * a.t * (3 - 2 * a.t); // ease in and out
+    // Swing around the globe (not through it), easing the distance too.
+    const dir = a.from.clone().normalize().lerp(a.to.clone().normalize(), k).normalize();
+    camera.position.copy(dir.multiplyScalar(a.from.length() + (a.to.length() - a.from.length()) * k));
+    camera.lookAt(0, 0, 0);
+    if (a.t >= 1) anim.current = null;
+  });
+  return null;
+}
+
 // Runs the simulation in step with rendering, at `speed` years per second.
 function Clock({ sim, speed }: { sim: PlanetSim; speed: number }) {
   useFrame((_, dt) => {
@@ -257,7 +286,7 @@ function Clock({ sim, speed }: { sim: PlanetSim; speed: number }) {
   return null;
 }
 
-export default function Globe({ sim, tool, speed, onPaint }: { sim: PlanetSim; tool: Tool; speed: number; onPaint: (power: GodPower, face: number) => void }) {
+export default function Globe({ sim, tool, speed, onPaint, onHover, focus }: { sim: PlanetSim; tool: Tool; speed: number; focus?: { face: number; key: number } | null; onPaint: (power: GodPower, face: number) => void; onHover?: (face: number | null, x: number, y: number) => void }) {
   return (
     <Canvas camera={{ position: [0, 0.6, 2.6], fov: 45 }} onContextMenu={(e) => e.preventDefault()} style={{ cursor: tool === "hand" ? "grab" : "crosshair" }}>
       <color attach="background" args={["#04050c"]} />
@@ -266,7 +295,8 @@ export default function Globe({ sim, tool, speed, onPaint }: { sim: PlanetSim; t
       <Stars radius={60} depth={30} count={3000} factor={3} fade />
       <Clock sim={sim} speed={speed} />
       <FaceStart sim={sim} />
-      <PlanetMesh sim={sim} tool={tool} onPaint={onPaint} />
+      <FlyTo sim={sim} focus={focus} />
+      <PlanetMesh sim={sim} tool={tool} onPaint={onPaint} onHover={onHover} />
       <People sim={sim} />
       <Houses sim={sim} />
       <Atmosphere />

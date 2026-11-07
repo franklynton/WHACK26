@@ -64,6 +64,8 @@ export default function Game({ playerName }: { playerName: string }) {
   const [sel, setSel] = useState(0); // the nation the god is looking at and talking to
   const [busy, setBusy] = useState<"" | "narrating" | "thinking">("");
   const [draft, setDraft] = useState("");
+  const [focus, setFocus] = useState<{ face: number; key: number } | null>(null); // where the camera flies to
+  const [hover, setHover] = useState<{ id: number; x: number; y: number } | null>(null); // nation under the mouse
 
   // Refs so timers always see the latest state without re-subscribing.
   const civsRef = useRef(civs);
@@ -210,6 +212,16 @@ export default function Game({ playerName }: { playerName: string }) {
     return () => clearInterval(id);
   }, [sim, pump, count]);
 
+  // Which nation is under the mouse: the land it owns, or else its nearest village or people.
+  const hoverAt = (face: number | null, x: number, y: number) => {
+    let id = face == null ? -1 : sim.owner[face];
+    if (face != null && id < 0) {
+      const near = (f: number) => sim.angle(f, face) < 0.05;
+      id = sim.villages.find((v) => near(v.face))?.nation ?? sim.people.find((p) => near(p.face))?.nation ?? -1;
+    }
+    setHover(id >= 0 ? { id, x, y } : null);
+  };
+
   // The god's words go into the chosen nation's chat; its mind answers as soon as it is free.
   const speak = (e: React.FormEvent) => {
     e.preventDefault();
@@ -230,7 +242,7 @@ export default function Game({ playerName }: { playerName: string }) {
   return (
     <main className="relative h-dvh w-full overflow-hidden select-none">
       <div className="absolute inset-0">
-        <Globe sim={sim} tool="hand" speed={speed} onPaint={() => {}} />
+        <Globe sim={sim} tool="hand" speed={speed} onPaint={() => {}} onHover={hoverAt} focus={focus} />
       </div>
 
       {/* The planet and its nations */}
@@ -259,7 +271,11 @@ export default function Game({ playerName }: { playerName: string }) {
             {hud.nations.map((n) => (
               <li key={n.id}>
                 <button
-                  onClick={() => setSel(n.id)}
+                  onClick={() => {
+                    setSel(n.id);
+                    const face = sim.nationHome(n.id);
+                    if (face != null) setFocus({ face, key: Date.now() });
+                  }}
                   className={`w-full rounded-lg px-2 py-1.5 text-left text-sm transition ${sel === n.id ? "bg-white/15" : "hover:bg-white/5"} ${n.alive ? "" : "opacity-40"}`}
                 >
                   <div className="flex items-center gap-2">
@@ -270,7 +286,7 @@ export default function Game({ playerName }: { playerName: string }) {
                   <div className="ml-4.5 flex flex-wrap gap-x-2 text-xs">
                     {n.crisis && <span className="font-semibold uppercase text-rose-300">{n.crisis}</span>}
                     {n.relations
-                      .filter((r) => r.relation !== "peace")
+                      .filter((r) => n.alive && r.relation !== "peace")
                       .map((r) => (
                         <span key={r.id} className={RELATION_STYLE[r.relation].cls} title={`${RELATION_STYLE[r.relation].label}, tension ${r.tension}`}>
                           {RELATION_STYLE[r.relation].icon} {cap(hud.nations[r.id].name)}
@@ -298,6 +314,8 @@ export default function Game({ playerName }: { playerName: string }) {
         )}
         <p className="text-xs text-white/40">Drag to rotate · scroll to zoom · fate decides the weather, you can only talk</p>
       </div>
+
+      {hover && hud.nations[hover.id] && <NationCard n={hud.nations[hover.id]} civ={civs[hover.id]} all={hud.nations} x={hover.x} y={hover.y} />}
 
       {/* The chosen nation's mind */}
       <aside className="glass absolute bottom-4 right-4 top-4 flex w-72 flex-col p-4">
@@ -394,6 +412,35 @@ function offline(url: string, { world, kind, chat = [] }: { world: World; kind?:
   }
   const r = fallbackReaction(world, kind ?? "milestone");
   return { civ: { ...world.civ, attitude: r.attitude }, entry: { year: world.year, kind, text: r.text } };
+}
+
+// The card that follows the mouse when hovering over a nation on the globe.
+function NationCard({ n, civ, all, x, y }: { n: NationInfo; civ: Civ | null; all: NationInfo[]; x: number; y: number }) {
+  const left = Math.min(x + 16, window.innerWidth - 260);
+  const top = Math.min(y + 16, window.innerHeight - 260);
+  return (
+    <div className="glass pointer-events-none fixed z-10 w-60 space-y-2 p-3 text-sm" style={{ left, top }}>
+      <div className="flex items-center gap-2">
+        <span className="h-3 w-3 rounded-full" style={{ background: n.color }} />
+        <p className="font-semibold">{cap(n.name)}</p>
+        {n.crisis && <span className="ml-auto text-xs font-semibold uppercase text-rose-300">{n.crisis}</span>}
+      </div>
+      {civ && <p className="text-xs text-white/60">{cap(civ.demonym)} · worship {civ.religion.godName} ({civ.religion.name}) · feel {civ.attitude}</p>}
+      <p className="text-xs text-white/70">
+        {n.alive ? `${n.population} people · ${n.villages} ${n.villages === 1 ? "village" : "villages"} · ${POLICY_LABEL[n.policy].toLowerCase()}` : "Fallen"}
+      </p>
+      <NeedBars needs={n.needs} crisis={null} />
+      {n.relations.length > 0 && (
+        <div className="flex flex-wrap gap-x-2 text-xs">
+          {n.relations.map((r) => (
+            <span key={r.id} className={RELATION_STYLE[r.relation].cls}>
+              {RELATION_STYLE[r.relation].icon} {RELATION_STYLE[r.relation].label} with {cap(all[r.id].name)}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function Stock({ icon, label, value }: { icon: string; label: string; value: number }) {

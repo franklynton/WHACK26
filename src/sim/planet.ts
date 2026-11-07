@@ -435,6 +435,12 @@ export class PlanetSim {
     this.people.push({ id: this.nextId++, face: f, from: f, t: Math.random(), hunger: 0.8, age: 16 + Math.random() * 10, village: null, nation: nat });
   }
 
+  // Where a nation is: its biggest village, or else where its people are.
+  nationHome(id: number): number | null {
+    const v = this.villages.filter((x) => x.nation === id).sort((a, b) => b.houses - a.houses)[0];
+    return v?.face ?? this.people.find((p) => p.nation === id)?.face ?? null;
+  }
+
   nearestNation(f: number) {
     let best = this.nations.find((n) => n.alive)?.id ?? 0, d = Infinity;
     for (const p of this.people) {
