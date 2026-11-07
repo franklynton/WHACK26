@@ -26,9 +26,14 @@ const FARM = new THREE.Color("#c9cf5b");
 // Deposits are speckled onto some of their tiles so the player can spot them.
 const DEPOSIT: Record<D, THREE.Color | null> = { [D.None]: null, [D.Metal]: new THREE.Color("#5b6f8f"), [D.Gold]: new THREE.Color("#ffd447"), [D.Herbs]: new THREE.Color("#b066d6") };
 const WHITE = new THREE.Color("#ffffff");
+const WALL = new THREE.Color("#efe3cf");
+const SHRINE = new THREE.Color("#ffd447");
 const SCORCH = new THREE.Color("#3a2f2a");
 const FIRE = [new THREE.Color("#ff6a1a"), new THREE.Color("#ffc23a")];
 const LAND_HEIGHT = 0.07; // how far mountains stand out from the sea
+const SEA = 1.004; // radius of the water surface; land sits just above it, the sea floor below
+// Height of a tile above the planet's core radius of 1.
+const lift = (e: number) => (e > 0 ? SEA - 1 + 0.002 + e * LAND_HEIGHT : e * 0.03);
 
 // Painting with a held mouse repeats at most this often.
 const PAINT_EVERY_MS = 70;
@@ -57,15 +62,17 @@ function PlanetMesh({ sim, tool, onPaint, onHover }: { sim: PlanetSim; tool: Too
     const pos = geometry.getAttribute("position") as THREE.BufferAttribute;
     const col = geometry.getAttribute("color") as THREE.BufferAttribute;
     // Corner height = highest land among the tiles that share it, so land has no cracks.
-    const corner = new Float32Array(sim.cornerCount);
+    const corner = new Float32Array(sim.cornerCount).fill(-1);
     for (let i = 0; i < pos.count; i++) {
-      const h = Math.max(0, sim.elevation[Math.floor(i / 3)]);
+      const h = lift(sim.elevation[Math.floor(i / 3)]);
       const c = sim.vertexId[i];
       if (h > corner[c]) corner[c] = h;
     }
     const c = new THREE.Color();
     const v = new THREE.Vector3();
     const nationCols = sim.nations.map((n) => new THREE.Color(n.color));
+    // 1. Each tile's own colour.
+    const tile = new Float32Array(sim.n * 3);
     for (let f = 0; f < sim.n; f++) {
       const t = sim.terrain[f] as T;
       if (sim.fire[f] > 0) c.copy(FIRE[Math.random() < 0.5 ? 0 : 1]);
@@ -73,28 +80,63 @@ function PlanetMesh({ sim, tool, onPaint, onHover }: { sim: PlanetSim; tool: Too
         c.set(COLORS[t]);
         if (sim.farm[f] && (t === T.Grass || t === T.Forest || t === T.Desert || t === T.Sand)) c.lerp(FARM, 0.55);
         const dep = DEPOSIT[sim.deposit[f] as D];
-        if (dep && tileRand(f, 3) < 0.45) c.lerp(dep, 0.5);
+        if (dep && tileRand(f, 3) < 0.45) c.lerp(dep, 0.6);
         if (sim.scorch[f] > 0) c.lerp(SCORCH, Math.min(0.8, sim.scorch[f] / 20));
-        // Nation territory: a light wash of its colour, with a strong line along the border.
+        // Nation territory: a light wash of its colour, stronger along the border.
         const o = sim.owner[f];
         if (o >= 0) {
           let edge = false;
           for (let k = 0; k < 3; k++) if (sim.owner[sim.neighbours[f * 3 + k]] !== o) edge = true;
-          c.lerp(nationCols[o], edge ? 0.7 : 0.18);
+          c.lerp(nationCols[o], edge ? 0.8 : 0.25);
         }
-        // Small per-tile variation gives a hand-painted, pixel-art feel.
-        c.offsetHSL(0, 0, (tileRand(f) - 0.5) * 0.06);
       }
+      tile[f * 3] = c.r;
+      tile[f * 3 + 1] = c.g;
+      tile[f * 3 + 2] = c.b;
+    }
+    // 2. Blend colours where tiles meet, so the land shades smoothly instead of a mosaic.
+    const mix = new Float32Array(sim.cornerCount * 4);
+    for (let i = 0; i < pos.count; i++) {
+      const f = Math.floor(i / 3), cc = sim.vertexId[i] * 4;
+      mix[cc] += tile[f * 3];
+      mix[cc + 1] += tile[f * 3 + 1];
+      mix[cc + 2] += tile[f * 3 + 2];
+      mix[cc + 3]++;
+    }
+    // 3. Positions, colours, and smooth normals shared by every tile at a corner.
+    const normal = new Float32Array(sim.cornerCount * 3);
+    const a = new THREE.Vector3(), b = new THREE.Vector3(), d = new THREE.Vector3();
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(base, i).normalize().multiplyScalar(1 + corner[sim.vertexId[i]]);
+      pos.setXYZ(i, v.x, v.y, v.z);
+      const f = Math.floor(i / 3);
+      if (sim.fire[f] > 0) col.setXYZ(i, tile[f * 3], tile[f * 3 + 1], tile[f * 3 + 2]);
+      else {
+        const cc = sim.vertexId[i] * 4;
+        col.setXYZ(i, mix[cc] / mix[cc + 3], mix[cc + 1] / mix[cc + 3], mix[cc + 2] / mix[cc + 3]);
+      }
+    }
+    for (let f = 0; f < sim.n; f++) {
+      a.fromBufferAttribute(pos, f * 3);
+      b.fromBufferAttribute(pos, f * 3 + 1).sub(a);
+      d.fromBufferAttribute(pos, f * 3 + 2).sub(a);
+      b.cross(d);
       for (let k = 0; k < 3; k++) {
-        const i = f * 3 + k;
-        col.setXYZ(i, c.r, c.g, c.b);
-        v.fromBufferAttribute(base, i).normalize().multiplyScalar(1 + corner[sim.vertexId[i]] * LAND_HEIGHT);
-        pos.setXYZ(i, v.x, v.y, v.z);
+        const cc = sim.vertexId[f * 3 + k] * 3;
+        normal[cc] += b.x;
+        normal[cc + 1] += b.y;
+        normal[cc + 2] += b.z;
       }
+    }
+    const nor = geometry.getAttribute("normal") as THREE.BufferAttribute;
+    for (let i = 0; i < pos.count; i++) {
+      const cc = sim.vertexId[i] * 3;
+      v.set(normal[cc], normal[cc + 1], normal[cc + 2]).normalize();
+      nor.setXYZ(i, v.x, v.y, v.z);
     }
     pos.needsUpdate = true;
     col.needsUpdate = true;
-    geometry.computeVertexNormals();
+    nor.needsUpdate = true;
     geometry.computeBoundingSphere();
   });
 
@@ -126,18 +168,121 @@ function PlanetMesh({ sim, tool, onPaint, onHover }: { sim: PlanetSim; tool: Too
       }}
       onPointerOut={() => onHover?.(null, 0, 0)}
     >
-      <meshStandardMaterial vertexColors flatShading roughness={0.95} />
+      <meshStandardMaterial vertexColors roughness={0.9} />
     </mesh>
   );
 }
 
 // A soft glow of water just above the sea, so oceans read as water, not blue land.
+// A soft glow around the planet: brighter towards the edge (a fresnel rim).
 function Atmosphere() {
+  const material = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        uniforms: { color: { value: new THREE.Color("#5fb0ff") } },
+        vertexShader: `varying vec3 vN; varying vec3 vV;
+          void main() { vN = normalize(normalMatrix * normal); vec4 mv = modelViewMatrix * vec4(position, 1.0); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
+        fragmentShader: `uniform vec3 color; varying vec3 vN; varying vec3 vV;
+          void main() { float rim = pow(1.0 - abs(dot(vN, vV)), 3.0); gl_FragColor = vec4(color, rim * 0.9); }`,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        side: THREE.BackSide,
+        depthWrite: false,
+      }),
+    [],
+  );
   return (
-    <mesh scale={1.06}>
-      <sphereGeometry args={[1, 48, 48]} />
-      <meshBasicMaterial color="#6fb6ff" transparent opacity={0.07} side={THREE.BackSide} />
+    <mesh scale={1.14} material={material}>
+      <sphereGeometry args={[1, 64, 64]} />
     </mesh>
+  );
+}
+
+// The sea: a glossy, see-through shell, so shallow water shows the sea floor beneath.
+function Ocean() {
+  return (
+    <mesh scale={SEA}>
+      <sphereGeometry args={[1, 96, 96]} />
+      <meshPhysicalMaterial color="#2a7fd4" transparent opacity={0.62} roughness={0.12} metalness={0.05} clearcoat={1} clearcoatRoughness={0.1} depthWrite={false} />
+    </mesh>
+  );
+}
+
+// Puffy low-poly clouds drifting slowly around the planet.
+const CLOUDS = 46;
+function Clouds() {
+  const group = useRef<THREE.Group>(null);
+  const ref = useRef<THREE.InstancedMesh>(null);
+  const PUFFS = 5;
+  useEffect(() => {
+    const mesh = ref.current;
+    if (!mesh) return;
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), s = new THREE.Vector3(), dir = new THREE.Vector3(), side = new THREE.Vector3();
+    let i = 0;
+    for (let c = 0; c < CLOUDS; c++) {
+      dir.randomDirection();
+      side.randomDirection().cross(dir).normalize();
+      for (let k = 0; k < PUFFS; k++) {
+        p.copy(dir).addScaledVector(side, (k - PUFFS / 2) * 0.018).normalize().multiplyScalar(1.13 + Math.random() * 0.01);
+        const r = 0.012 + Math.random() * 0.014 * (1 - Math.abs(k - PUFFS / 2) / PUFFS);
+        s.set(r, r * 0.7, r);
+        q.setFromUnitVectors(new THREE.Vector3(0, 1, 0), p.clone().normalize());
+        m.compose(p, q, s);
+        mesh.setMatrixAt(i++, m);
+      }
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+  }, []);
+  useFrame((_, dt) => {
+    if (group.current) group.current.rotation.y += dt * 0.01;
+  });
+  return (
+    <group ref={group}>
+      <instancedMesh ref={ref} args={[undefined, undefined, CLOUDS * PUFFS]} frustumCulled={false}>
+        <icosahedronGeometry args={[1, 1]} />
+        <meshStandardMaterial color="#ffffff" flatShading transparent opacity={0.7} roughness={1} depthWrite={false} />
+      </instancedMesh>
+    </group>
+  );
+}
+
+// A little low-poly tree on most forest tiles (pines on cold, high ground).
+const MAX_TREES = 9000;
+function Trees({ sim }: { sim: PlanetSim }) {
+  const ref = useRef<THREE.InstancedMesh>(null);
+  const shown = useRef(-1);
+  const geometry = useMemo(() => {
+    const g = new THREE.ConeGeometry(0.005, 0.016, 5);
+    g.translate(0, 0.008, 0);
+    return g;
+  }, []);
+  useFrame(() => {
+    const mesh = ref.current;
+    if (!mesh || shown.current === sim.version) return;
+    shown.current = sim.version;
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), s = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0), c = new THREE.Color();
+    let i = 0;
+    for (let f = 0; f < sim.n && i < MAX_TREES; f++) {
+      if (sim.terrain[f] !== T.Forest || sim.fire[f] > 0 || sim.farm[f] || tileRand(f, 7) < 0.25) continue;
+      surface(sim, f, p);
+      const n = p.clone().normalize();
+      q.setFromUnitVectors(up, n);
+      const size = 0.7 + tileRand(f, 9) * 0.6;
+      s.set(size, size * (0.9 + tileRand(f, 11) * 0.5), size);
+      m.compose(p, q, s);
+      mesh.setMatrixAt(i, m);
+      c.setHSL(0.3 + tileRand(f, 13) * 0.06, 0.5, 0.18 + tileRand(f, 15) * 0.1);
+      mesh.setColorAt(i, c);
+      i++;
+    }
+    mesh.count = i;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  });
+  return (
+    <instancedMesh ref={ref} args={[geometry, undefined, MAX_TREES]} frustumCulled={false}>
+      <meshStandardMaterial flatShading roughness={0.9} />
+    </instancedMesh>
   );
 }
 
@@ -147,7 +292,7 @@ const MAX_HOUSES = 1200;
 // Where on the surface a tile is, lifted to its land height.
 function surface(sim: PlanetSim, f: number, out: THREE.Vector3) {
   out.set(sim.centroids[f * 3], sim.centroids[f * 3 + 1], sim.centroids[f * 3 + 2]);
-  return out.multiplyScalar(1 + Math.max(0, sim.elevation[f]) * LAND_HEIGHT);
+  return out.multiplyScalar(1 + Math.max(SEA - 1, lift(sim.elevation[f])));
 }
 
 function People({ sim }: { sim: PlanetSim }) {
@@ -194,6 +339,12 @@ function People({ sim }: { sim: PlanetSim }) {
 
 function Houses({ sim }: { sim: PlanetSim }) {
   const ref = useRef<THREE.InstancedMesh>(null);
+  const roofs = useRef<THREE.InstancedMesh>(null);
+  const roof = useMemo(() => {
+    const g = new THREE.ConeGeometry(0.0085, 0.008, 4);
+    g.rotateY(Math.PI / 4);
+    return g;
+  }, []);
   const m = useMemo(() => new THREE.Matrix4(), []);
   const centre = useMemo(() => new THREE.Vector3(), []);
   const p = useMemo(() => new THREE.Vector3(), []);
@@ -206,7 +357,8 @@ function Houses({ sim }: { sim: PlanetSim }) {
 
   useFrame(() => {
     const mesh = ref.current;
-    if (!mesh) return;
+    const top = roofs.current;
+    if (!mesh || !top) return;
     let i = 0;
     for (const v of sim.villages) {
       surface(sim, v.face, centre);
@@ -226,19 +378,31 @@ function Houses({ sim }: { sim: PlanetSim }) {
         s.setScalar(k === 0 ? 1.6 : 1); // the first house is the shrine
         m.compose(p, q, s);
         mesh.setMatrixAt(i, m);
-        mesh.setColorAt(i, k === 0 ? WHITE : (cols[v.nation] ?? WHITE));
+        mesh.setColorAt(i, WALL);
+        // The roof sits on top, in the nation's colour (the shrine's is gold).
+        p.addScaledVector(n, 0.0095 * s.x);
+        m.compose(p, q, s);
+        top.setMatrixAt(i, m);
+        top.setColorAt(i, k === 0 ? SHRINE : (cols[v.nation] ?? WHITE));
       }
     }
-    mesh.count = i;
-    mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    for (const x of [mesh, top]) {
+      x.count = i;
+      x.instanceMatrix.needsUpdate = true;
+      if (x.instanceColor) x.instanceColor.needsUpdate = true;
+    }
   });
 
   return (
-    <instancedMesh ref={ref} args={[undefined, undefined, MAX_HOUSES]} frustumCulled={false}>
-      <boxGeometry args={[0.01, 0.011, 0.01]} />
-      <meshStandardMaterial color="#ffffff" roughness={0.8} />
-    </instancedMesh>
+    <>
+      <instancedMesh ref={ref} args={[undefined, undefined, MAX_HOUSES]} frustumCulled={false}>
+        <boxGeometry args={[0.009, 0.01, 0.009]} />
+        <meshStandardMaterial color="#ffffff" roughness={0.8} />
+      </instancedMesh>
+      <instancedMesh ref={roofs} args={[roof, undefined, MAX_HOUSES]} frustumCulled={false}>
+        <meshStandardMaterial color="#ffffff" flatShading roughness={0.7} />
+      </instancedMesh>
+    </>
   );
 }
 
@@ -278,6 +442,19 @@ function FlyTo({ sim, focus }: { sim: PlanetSim; focus?: { face: number; key: nu
   return null;
 }
 
+// The sun follows the camera from above and to one side, so the side you look at is lit.
+function Sun() {
+  const ref = useRef<THREE.DirectionalLight>(null);
+  const camera = useThree((s) => s.camera);
+  useFrame(() => {
+    const light = ref.current;
+    if (!light) return;
+    const right = new THREE.Vector3().crossVectors(camera.up, camera.position).normalize();
+    light.position.copy(camera.position).addScaledVector(camera.up, 1.6).addScaledVector(right, -1.4);
+  });
+  return <directionalLight ref={ref} intensity={2.3} color="#fff1dc" />;
+}
+
 // Runs the simulation in step with rendering, at `speed` years per second.
 function Clock({ sim, speed }: { sim: PlanetSim; speed: number }) {
   useFrame((_, dt) => {
@@ -290,8 +467,9 @@ export default function Globe({ sim, tool, speed, onPaint, onHover, focus }: { s
   return (
     <Canvas camera={{ position: [0, 0.6, 2.6], fov: 45 }} onContextMenu={(e) => e.preventDefault()} style={{ cursor: tool === "hand" ? "grab" : "crosshair" }}>
       <color attach="background" args={["#04050c"]} />
-      <ambientLight intensity={0.45} />
-      <directionalLight position={[4, 2, 3]} intensity={1.8} />
+      <hemisphereLight args={["#cfe6ff", "#2a1e14", 0.7]} />
+      <Sun />
+      <directionalLight position={[-3, -1, -2]} intensity={0.25} color="#7aa7ff" />
       <Stars radius={60} depth={30} count={3000} factor={3} fade />
       <Clock sim={sim} speed={speed} />
       <FaceStart sim={sim} />
@@ -299,6 +477,9 @@ export default function Globe({ sim, tool, speed, onPaint, onHover, focus }: { s
       <PlanetMesh sim={sim} tool={tool} onPaint={onPaint} onHover={onHover} />
       <People sim={sim} />
       <Houses sim={sim} />
+      <Trees sim={sim} />
+      <Ocean />
+      <Clouds />
       <Atmosphere />
       <OrbitControls
         enablePan={false}
