@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="45%" r="70%">
+      <stop offset="0" stop-color="#1b2550"/>
+      <stop offset="1" stop-color="#070a1a"/>
+    </radialGradient>
+    <radialGradient id="halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0.62" stop-color="#5fd4ff" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#5fd4ff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="ocean" cx="35%" cy="32%" r="75%">
+      <stop offset="0" stop-color="#4fd8e8"/>
+      <stop offset="0.5" stop-color="#1679b8"/>
+      <stop offset="1" stop-color="#0b2d63"/>
+    </radialGradient>
+    <radialGradient id="shade" cx="30%" cy="28%" r="85%">
+      <stop offset="0.45" stop-color="#000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#030616" stop-opacity="0.85"/>
+    </radialGradient>
+    <radialGradient id="shine" cx="34%" cy="28%" r="30%">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="ring" x1="0" x2="1">
+      <stop offset="0" stop-color="#ffd27a" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#ffd27a"/>
+      <stop offset="1" stop-color="#ffb347" stop-opacity="0.2"/>
+    </linearGradient>
+    <clipPath id="globe"><circle cx="256" cy="256" r="150"/></clipPath>
+  </defs>
+
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <g fill="#fff">
+    <circle cx="86" cy="98" r="3" opacity=".8"/>
+    <circle cx="420" cy="80" r="2.5" opacity=".6"/>
+    <circle cx="448" cy="402" r="3" opacity=".7"/>
+    <circle cx="70" cy="380" r="2" opacity=".5"/>
+    <circle cx="140" cy="452" r="2.5" opacity=".6"/>
+  </g>
+
+  <circle cx="256" cy="256" r="200" fill="url(#halo)"/>
+
+  <!-- orbit path, back half (behind the planet) -->
+  <ellipse cx="256" cy="256" rx="214" ry="62" transform="rotate(-22 256 256)"
+           fill="none" stroke="url(#ring)" stroke-width="6" opacity=".5"/>
+
+  <g clip-path="url(#globe)">
+    <circle cx="256" cy="256" r="150" fill="url(#ocean)"/>
+    <!-- continents: three nations -->
+    <path d="M150 180c22-34 64-50 98-38 20 7 18 30 4 40-18 13-8 32 12 34 22 2 26 26 6 38-26 15-58 4-76 20-16 14-40 8-48-14-10-26-12-54 4-80z" fill="#5cc96b"/>
+    <path d="M290 132c30-6 66 6 88 30 12 14 4 30-14 30-20 0-30 14-22 30 6 14-8 24-24 18-24-8-30-34-46-48-16-14-12-54 18-60z" fill="#e8c35a"/>
+    <path d="M268 300c26-14 70-12 92 8 18 16 16 44-4 58-30 22-76 26-100 6-20-16-14-58 12-72z" fill="#e0785a"/>
+    <!-- borders between nations -->
+    <g fill="none" stroke="#fff" stroke-width="3" stroke-dasharray="2 7" stroke-linecap="round" opacity=".7">
+      <path d="M262 150 Q280 210 300 250"/>
+      <path d="M240 290 Q270 300 300 300"/>
+    </g>
+    <circle cx="256" cy="256" r="150" fill="url(#shade)"/>
+    <circle cx="256" cy="256" r="150" fill="url(#shine)"/>
+    <!-- village lights on the night side -->
+    <g fill="#ffe08a">
+      <circle cx="338" cy="352" r="4"/>
+      <circle cx="362" cy="330" r="3"/>
+      <circle cx="318" cy="372" r="2.5"/>
+      <circle cx="384" cy="250" r="3"/>
+      <circle cx="372" cy="272" r="2"/>
+    </g>
+  </g>
+  <circle cx="256" cy="256" r="150" fill="none" stroke="#9ff0ff" stroke-opacity=".5" stroke-width="3"/>
+
+  <!-- orbit path, front half, with the god's eye moon -->
+  <path d="M58.5 336.2 A214 62 -22 0 0 453.5 175.8"
+        fill="none" stroke="url(#ring)" stroke-width="7"/>
+  <circle cx="404" cy="214" r="20" fill="#fff4d6"/>
+  <circle cx="404" cy="214" r="34" fill="#ffd27a" opacity=".25"/>
+</svg>
