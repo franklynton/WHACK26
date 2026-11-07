@@ -4,30 +4,16 @@
 // Each nation has its own AI mind, religion and chat. This file wires the sim
 // (src/sim/planet.ts) to the LLM routes (/api/narrate, /api/mind).
 import { useCallback, useEffect, useRef, useState } from "react";
-import Globe, { type Tool } from "./Globe";
+import Globe from "./Globe";
 import { PlanetSim, type SimEvent } from "@/sim/planet";
 import { fallbackCiv, fallbackReaction, fallbackThought } from "@/lib/narrator";
 import type { ChronicleEntry, ChronicleKind, Civ, Crisis, GodPower, MindMessage, NationInfo, Needs, PlanetStats, Policy, Relation, World } from "@/types/world";
 
-const TOOLS: { tool: Tool; label: string; icon: string }[] = [
-  { tool: "hand", label: "Rotate", icon: "✋" },
-  { tool: "spawn", label: "People", icon: "🧍" },
-  { tool: "raise", label: "Raise", icon: "⛰️" },
-  { tool: "lower", label: "Sink", icon: "🌊" },
-  { tool: "forest", label: "Forest", icon: "🌲" },
-  { tool: "rain", label: "Rain", icon: "🌧️" },
-  { tool: "drought", label: "Drought", icon: "☀️" },
-  { tool: "miracle", label: "Miracle", icon: "✨" },
-  { tool: "peace", label: "Peace", icon: "🕊️" },
-  { tool: "discord", label: "Discord", icon: "😈" },
-  { tool: "fire", label: "Fire", icon: "🔥" },
-  { tool: "meteor", label: "Meteor", icon: "☄️" },
-];
-const BRUSHES = [
-  { label: "S", radius: 0.04 },
-  { label: "M", radius: 0.08 },
-  { label: "L", radius: 0.15 },
-];
+// The player has no powers: fate uses them at random (see PlanetSim.maybeFate).
+const FATE_ICON: Record<GodPower, string> = {
+  spawn: "🧍", raise: "⛰️", lower: "🌊", forest: "🌲", rain: "🌧️", drought: "☀️",
+  miracle: "✨", peace: "🕊️", discord: "😈", fire: "🔥", meteor: "☄️",
+};
 const SPEEDS = [
   { label: "⏸", speed: 0 },
   { label: "1×", speed: 1 },
@@ -59,6 +45,7 @@ interface Hud {
   stats: PlanetStats;
   needs: Needs;
   nations: NationInfo[];
+  fate: PlanetSim["fate"];
 }
 
 export default function Game({ playerName }: { playerName: string }) {
@@ -68,8 +55,6 @@ export default function Game({ playerName }: { playerName: string }) {
     return s;
   });
   const count = sim.nations.length;
-  const [tool, setTool] = useState<Tool>("rain");
-  const [brush, setBrush] = useState(1);
   const [speed, setSpeed] = useState(1);
   const [hud, setHud] = useState<Hud>(() => readHud(sim));
   const [civs, setCivs] = useState<(Civ | null)[]>(() => new Array(count).fill(null));
@@ -93,7 +78,6 @@ export default function Game({ playerName }: { playerName: string }) {
   const lastThought = useRef<number[]>(new Array(count).fill(Date.now()));
   const lastAnyThought = useRef(Date.now());
   const answerDue = useRef<number | null>(null); // the god spoke to this nation and it hasn't answered yet
-  const stroke = useRef<{ power: GodPower; face: number } | null>(null);
   const lastTold = useRef<Record<string, number>>({}); // year each kind of event was last narrated, per nation
 
   const setCiv = (id: number, civ: Civ) => {
@@ -226,24 +210,6 @@ export default function Game({ playerName }: { playerName: string }) {
     return () => clearInterval(id);
   }, [sim, pump, count]);
 
-  // A stroke of a power is narrated once, when the mouse is released, by the nation it touched.
-  useEffect(() => {
-    const up = () => {
-      const s = stroke.current;
-      stroke.current = null;
-      if (!s || s.power === "spawn") return;
-      const nation = sim.owner[s.face] >= 0 ? sim.owner[s.face] : sim.nearestNation(s.face);
-      if (civsRef.current[nation]) queue.current.push({ kind: s.power, detail: `The god used ${s.power} near ${sim.nationName(nation)}.`, nation });
-    };
-    window.addEventListener("pointerup", up);
-    return () => window.removeEventListener("pointerup", up);
-  }, [sim]);
-
-  const paint = (power: GodPower, face: number) => {
-    sim.apply(power, face, BRUSHES[brush].radius);
-    if (power !== "meteor") stroke.current = { power, face }; // meteors report themselves
-  };
-
   // The god's words go into the chosen nation's chat; its mind answers as soon as it is free.
   const speak = (e: React.FormEvent) => {
     e.preventDefault();
@@ -251,7 +217,7 @@ export default function Game({ playerName }: { playerName: string }) {
     if (!text || !civs[sel]) return;
     setDraft("");
     addChat(sel, { from: "god", text });
-    sim.nations[sel].faith = Math.min(100, sim.nations[sel].faith + 6); // being spoken to by their god renews their faith
+    sim.nations[sel].faith = Math.min(100, sim.nations[sel].faith + 15); // being spoken to by their god renews their faith
     answerDue.current = sel;
     pump();
   };
@@ -264,7 +230,7 @@ export default function Game({ playerName }: { playerName: string }) {
   return (
     <main className="relative h-dvh w-full overflow-hidden select-none">
       <div className="absolute inset-0">
-        <Globe sim={sim} tool={tool} speed={speed} onPaint={paint} />
+        <Globe sim={sim} tool="hand" speed={speed} onPaint={() => {}} />
       </div>
 
       {/* The planet and its nations */}
@@ -316,24 +282,21 @@ export default function Game({ playerName }: { playerName: string }) {
             ))}
           </ul>
         </div>
-        <div className="mt-auto flex justify-between">
-          <Segmented options={BRUSHES.map((b) => b.label)} value={brush} onChange={setBrush} title="Brush" />
+        <div className="mt-auto flex justify-center">
           <Segmented options={SPEEDS.map((s) => s.label)} value={SPEEDS.findIndex((s) => s.speed === speed)} onChange={(i) => setSpeed(SPEEDS[i].speed)} title="Speed" />
         </div>
-        {!awake && <p className="text-xs text-white/55">Your nations are wandering. Keep them fed and each will found a village, then become aware of you. Keep them from fighting.</p>}
+        {!awake && <p className="text-xs text-white/55">Your nations are wandering. When each founds a village it will become aware of you. Your words are your only power: talk them out of fighting.</p>}
       </aside>
 
-      {/* God powers: centred in the space between the two side panels */}
-      <div className="pointer-events-none absolute bottom-4 left-[17.5rem] right-[19.5rem] flex flex-col items-center gap-1.5">
-        <p className="text-xs text-white/40">Left-drag to use a power · right-drag to rotate · scroll to zoom</p>
-        <div className="glass pointer-events-auto flex flex-wrap justify-center gap-1 p-1.5">
-          {TOOLS.map((t) => (
-            <button key={t.tool} onClick={() => setTool(t.tool)} className={`tool ${tool === t.tool ? "tool-on" : ""}`} title={t.label}>
-              <span className="text-lg leading-none">{t.icon}</span>
-              {t.label}
-            </button>
-          ))}
-        </div>
+      {/* Fate: the latest thing the heavens did, and the controls hint */}
+      <div className="pointer-events-none absolute bottom-4 left-[17.5rem] right-[19.5rem] flex flex-col items-center gap-2">
+        {hud.fate && hud.year - hud.fate.at < 12 && (
+          <div key={hud.fate.at} className="glass flex items-center gap-2 px-4 py-2 text-sm">
+            <span className="text-xl leading-none">{FATE_ICON[hud.fate.power]}</span>
+            {cap(hud.fate.text)}
+          </div>
+        )}
+        <p className="text-xs text-white/40">Drag to rotate · scroll to zoom · fate decides the weather, you can only talk</p>
       </div>
 
       {/* The chosen nation's mind */}
@@ -405,7 +368,7 @@ export default function Game({ playerName }: { playerName: string }) {
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
 
 function readHud(sim: PlanetSim): Hud {
-  return { year: sim.year, stats: sim.stats(), needs: sim.needs(), nations: sim.nationInfo() };
+  return { year: sim.year, stats: sim.stats(), needs: sim.needs(), nations: sim.nationInfo(), fate: sim.fate };
 }
 
 // Calls an LLM route. If the server can't be reached (for example the static demo build,

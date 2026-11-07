@@ -468,6 +468,7 @@ export class PlanetSim {
     this.stepNations(dt);
     this.stepNeeds(dt);
     this.maybeDisaster(dt);
+    this.maybeFate(dt);
     this.checkMilestones();
   }
 
@@ -844,7 +845,7 @@ export class PlanetSim {
     for (const nt of this.nations) {
       if (!nt.alive) continue;
       const food = this.nationFood(nt.id);
-      const decay = nt.policy === "worship" ? 0.15 : nt.policy === "rebel" ? 1.5 : 0.5;
+      const decay = nt.policy === "worship" ? 0.1 : nt.policy === "rebel" ? 1.2 : 0.3;
       nt.faith = Math.max(0, nt.faith - decay * dt);
       // Rebels burn the god's shrines now and then.
       const mine = this.villages.filter((v) => v.nation === nt.id);
@@ -859,6 +860,39 @@ export class PlanetSim {
 
   // Random natural disasters, not caused by the god (though the people may blame them).
   // Rare at first; the more people there are, the more there is to hit.
+  // ---- Fate ----
+  // The player can't use powers directly: the heavens use them at random, and the
+  // people believe their god did it. The player's only influence is talking to them.
+  private nextFate = 8 + Math.random() * 8;
+  fate: { power: GodPower; text: string; at: number } | null = null; // the latest act, for the HUD
+
+  private maybeFate(dt: number) {
+    this.nextFate -= dt;
+    if (this.nextFate > 0 || !this.people.length) return;
+    this.nextFate = 12 + Math.random() * 18;
+    const bag: [GodPower, number][] = [
+      ["rain", 3], ["forest", 2], ["miracle", 2], ["peace", 2], ["drought", 2], ["discord", 2],
+      ["spawn", 1], ["raise", 1], ["lower", 1], ["fire", 1], ["meteor", 1],
+    ];
+    let r = Math.random() * bag.reduce((t, [, w]) => t + w, 0);
+    const power = bag.find(([, w]) => (r -= w) < 0)![0];
+    // Mostly aim near people, so it matters.
+    const target = Math.random() < 0.8 ? this.people[Math.floor(Math.random() * this.people.length)].face : Math.floor(Math.random() * this.n);
+    const radius = 0.05 + Math.random() * 0.08;
+    const strokes = power === "meteor" || power === "spawn" ? 1 : power === "fire" ? 2 : 6; // a brush power is painted several times
+    for (let i = 0; i < strokes; i++) this.apply(power, target, radius);
+    const nation = this.owner[target] >= 0 ? this.owner[target] : this.nearestNation(target);
+    const where = this.nationName(nation);
+    const words: Record<GodPower, string> = {
+      rain: `Rain falls on ${where}.`, forest: `A forest springs up near ${where}.`, miracle: `The fields of ${where} bloom overnight.`,
+      peace: `A strange calm settles over ${where}.`, drought: `Drought grips ${where}.`, discord: `Anger spreads through ${where}.`,
+      spawn: `Strangers appear from nowhere near ${where}.`, raise: `The land heaves up near ${where}.`, lower: `The sea swallows land near ${where}.`,
+      fire: `Fire breaks out near ${where}.`, meteor: `A meteor falls near ${where}.`,
+    };
+    this.fate = { power, text: words[power], at: this.year };
+    if (power !== "meteor") this.events.push({ kind: power, detail: `${words[power]} The people believe their god did it.`, nation });
+  }
+
   private nextDisaster = 40 + Math.random() * 40; // years until the next one
 
   private maybeDisaster(dt: number) {
