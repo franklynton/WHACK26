@@ -50,7 +50,7 @@ export default function LeaderDialog({
     <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/55 p-6 backdrop-blur-sm" onClick={onClose}>
       <div className="glass alert-pop flex h-[min(620px,90vh)] w-[min(920px,100%)] overflow-hidden" onClick={(e) => e.stopPropagation()}>
         {/* The leader */}
-        <div className="flex w-72 shrink-0 flex-col items-center gap-3 border-r border-white/10 bg-white/[0.03] p-5 text-center">
+        <div className="flex w-80 shrink-0 flex-col items-center gap-3 border-r border-white/10 bg-white/[0.03] p-5 text-center">
           <Portrait race={nation.race} seed={l.seed} color={nation.color} mood={mood} size={220} />
           <div>
             <p className="text-xs uppercase tracking-wider text-white/50">{l.title}</p>

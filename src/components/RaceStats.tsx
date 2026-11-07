@@ -1,6 +1,7 @@
 // A race's strengths and weaknesses as stat bars, read straight from the numbers the
 // sim uses (src/sim/races.ts), so the bars always match how the race really plays.
-// The marker in each bar is the human baseline: green past it is better, red short of it is worse.
+// Every number compares to humans: multipliers like ×1.3 mean 30% more than a human, and the
+// score over each bar is out of 10 with humans at 5. Green is better than human, red is worse.
 import { RACE, type Race, type RaceId } from "@/sim/races";
 import type { Resources } from "@/types/world";
 
@@ -40,18 +41,23 @@ export default function RaceStats({ race, compact = false }: { race: RaceId; com
   const gather = (Object.entries(r.yield) as [keyof Resources, number][]).sort((a, b) => b[1] - a[1]);
   return (
     <div className={compact ? "space-y-1" : "space-y-1.5"}>
+      <p className="text-[11px] text-white/45">Compared to humans: 5/10 and ×1 is human, the white line marks it.</p>
       {raceStats(r).map((s) => {
         const tone = s.better > 0 ? "bg-emerald-400" : s.better < 0 ? "bg-rose-400" : "bg-sky-300";
         const text = s.better > 0 ? "text-emerald-300" : s.better < 0 ? "text-rose-300" : "text-white/60";
         return (
-          <div key={s.label} className="flex items-center gap-2 text-xs" title={`${s.label}: ${s.value} (human baseline marked)`}>
+          <div key={s.label} className="flex items-center gap-2 text-xs" title={`${s.label}: ${Math.round(s.score * 10)}/10, ${s.value} compared to a human (human = 5/10, ×1)`}>
             <span className="w-4 text-center">{s.icon}</span>
-            <span className="w-16 shrink-0 text-white/70">{s.label}</span>
-            <div className="relative h-2 flex-1 rounded-full bg-white/10">
-              <div className={`h-full rounded-full ${tone}`} style={{ width: `${s.score * 100}%` }} />
-              <div className="absolute -top-0.5 h-3 w-px bg-white/60" style={{ left: `${HUMAN * 100}%` }} />
+            <span className={`${compact ? "w-14" : "w-16"} shrink-0 text-white/70`}>{s.label}</span>
+            <div className="relative h-4 flex-1 overflow-hidden rounded-full bg-white/10">
+              <div className={`h-full rounded-full ${tone} opacity-80`} style={{ width: `${s.score * 100}%` }} />
+              <div className="absolute inset-y-0 w-px bg-white/70" style={{ left: `${HUMAN * 100}%` }} />
+              {/* The score out of 10 (human = 5), printed over the bar */}
+              <span className="absolute inset-y-0 left-1.5 flex items-center text-[11px] font-bold tabular-nums text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.9)]">
+                {Math.round(s.score * 10)}/10
+              </span>
             </div>
-            <span className={`w-20 shrink-0 text-right tabular-nums ${text}`}>{s.value}</span>
+            <span className={`${compact ? "w-[4.5rem]" : "w-20"} shrink-0 text-right tabular-nums ${text}`}>{s.value}</span>
           </div>
         );
       })}
