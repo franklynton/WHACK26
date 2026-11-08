@@ -109,18 +109,21 @@ export function useFleets({ worldId, post, sync, sim, active, onSettled }: { wor
 }
 export type FleetsState = ReturnType<typeof useFleets>;
 
-// A fleet coming at us: a card over the game with a countdown and three answers.
+// A fleet coming at us: a card over the game with a countdown ring, the odds, and three answers.
 export function IncomingFleets({ sim, fleets }: { sim: PlanetSim; fleets: FleetsState }) {
   const [errors, setErrors] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState<number | null>(null);
   const [fighting, setFighting] = useState<Record<number, boolean>>({});
   const live = fleets.incoming.filter((f) => fleetSecondsLeft(f) > 0).slice(0, 2);
   if (live.length === 0) return null;
+  const defence = sim.defenceStrength();
   return (
-    <div className="pointer-events-none absolute right-4 top-20 z-40 flex w-[22rem] max-w-[calc(100vw-2rem)] flex-col gap-2" aria-live="assertive">
+    <div className="pointer-events-none absolute right-4 top-20 z-40 flex w-[24rem] max-w-[calc(100vw-2rem)] flex-col gap-3" aria-live="assertive">
       {live.map((f) => {
         const left = fleetSecondsLeft(f);
         const decided = f.answer !== "fight" || fighting[f.id];
+        const urgent = left <= 10;
+        const R = 22, C = 2 * Math.PI * R;
         const pick = async (choice: Fleet["answer"]) => {
           setBusy(f.id);
           const why = await fleets.answer(f, choice);
@@ -128,41 +131,72 @@ export function IncomingFleets({ sim, fleets }: { sim: PlanetSim; fleets: Fleets
           setErrors((e) => ({ ...e, [f.id]: why }));
           if (!why && choice === "fight") setFighting((x) => ({ ...x, [f.id]: true }));
         };
+        const options: { id: Fleet["answer"]; icon: string; title: string; sub: string; tone: string; off?: boolean }[] = [
+          { id: "fight", icon: "⚔️", title: "Fight", sub: "Meet them on the shore", tone: "from-rose-500/30 to-rose-500/10 ring-rose-300/30 hover:from-rose-500/45" },
+          { id: "tribute", icon: "💰", title: "Tribute", sub: "15% gold & food, no deaths", tone: "from-amber-400/25 to-amber-400/5 ring-amber-200/25 hover:from-amber-400/40" },
+          { id: "shields", icon: "🛡️", title: "Shields", sub: `${SHIELD_COST} devotion · defence ×1.5`, tone: "from-sky-400/25 to-sky-400/5 ring-sky-200/25 hover:from-sky-400/40", off: sim.devotion < SHIELD_COST },
+        ];
         return (
-          <section key={f.id} className="glass pointer-events-auto border border-rose-400/30 p-4 shadow-2xl" aria-label={`Fleet from ${f.from_name}`}>
-            <p className="text-xs font-semibold uppercase tracking-wider text-rose-200">🛸 Invasion fleet incoming</p>
-            <p className="mt-1.5 text-sm leading-snug">
-              <b>{f.fleet} soldiers</b> from <b>{f.from_name}</b> land in <b className="tabular-nums">{left}s</b>.
-            </p>
-            <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10">
-              <div className="h-full rounded-full bg-rose-400 transition-[width] duration-1000 ease-linear" style={{ width: `${(left / FLIGHT_SECONDS) * 100}%` }} />
-            </div>
-            {fighting[f.id] && f.answer === "fight" && <p className="mt-2 text-xs text-rose-200">⚔️ Your army is waiting on the shore.</p>}
-            {f.answer === "shields" && <p className="mt-2 text-xs text-sky-200">🛡️ Shields up: your defence is half as strong again.</p>}
-            {errors[f.id] && (
-              <p role="alert" className="mt-2 text-xs text-rose-300">
-                {errors[f.id]}
-              </p>
-            )}
-            {!decided && (
-              <div className="mt-3 grid grid-cols-3 gap-2">
-                <button disabled={busy === f.id} onClick={() => pick("fight")} title="Your army meets them where they land" className="rounded-lg bg-rose-400/25 px-2 py-1.5 text-xs font-semibold text-rose-50 hover:bg-rose-400/35 disabled:opacity-40">
-                  ⚔️ Fight
-                </button>
-                <button disabled={busy === f.id} onClick={() => pick("tribute")} title="Give 15% of your gold and food; nobody dies" className="rounded-lg bg-amber-400/20 px-2 py-1.5 text-xs font-semibold text-amber-50 hover:bg-amber-400/30 disabled:opacity-40">
-                  💰 Tribute
-                </button>
-                <button
-                  disabled={busy === f.id || sim.devotion < SHIELD_COST}
-                  onClick={() => pick("shields")}
-                  title={`Spend ${SHIELD_COST} devotion: defence x1.5`}
-                  className="rounded-lg bg-sky-400/20 px-2 py-1.5 text-xs font-semibold text-sky-50 hover:bg-sky-400/30 disabled:opacity-40"
-                >
-                  🛡️ Shields
-                </button>
+          <section
+            key={f.id}
+            className={`glass pointer-events-auto overflow-hidden border shadow-2xl ${urgent && !decided ? "border-rose-400/60 shadow-[0_0_40px_rgba(244,63,94,.35)]" : "border-rose-400/30"}`}
+            aria-label={`Fleet from ${f.from_name}`}
+          >
+            <div className="flex items-center gap-3 bg-gradient-to-r from-rose-600/30 via-rose-500/10 to-transparent p-4">
+              <div className="relative h-14 w-14 shrink-0">
+                <svg viewBox="0 0 56 56" className="h-14 w-14 -rotate-90">
+                  <circle cx="28" cy="28" r={R} fill="none" stroke="rgba(255,255,255,.1)" strokeWidth="4" />
+                  <circle
+                    cx="28" cy="28" r={R} fill="none" stroke={urgent ? "#fb7185" : "#fda4af"} strokeWidth="4" strokeLinecap="round"
+                    strokeDasharray={C} strokeDashoffset={C * (1 - left / FLIGHT_SECONDS)}
+                    style={{ transition: "stroke-dashoffset 1s linear" }}
+                  />
+                </svg>
+                <span className={`absolute inset-0 flex items-center justify-center text-lg font-bold tabular-nums ${urgent ? "animate-pulse text-rose-200" : "text-white"}`}>{left}</span>
               </div>
-            )}
-            {!decided && <p className="mt-2 text-[11px] text-white/45">No answer means your people fight. Shields cost {SHIELD_COST} devotion (you have {Math.floor(sim.devotion)}).</p>}
+              <div className="min-w-0">
+                <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-rose-200">
+                  <span className="h-1.5 w-1.5 animate-ping rounded-full bg-rose-400" /> Invasion incoming
+                </p>
+                <p className="mt-0.5 text-sm leading-snug text-white">
+                  <b>{f.fleet} soldiers</b> from <b>{f.from_name}</b>
+                </p>
+                <p className="text-[11px] text-white/50">
+                  Your defence <b className="tabular-nums text-white/80">{defence}</b>
+                  {f.answer === "shields" && <span className="text-sky-200"> → {Math.round(defence * 1.5)} with shields</span>}
+                </p>
+              </div>
+            </div>
+            <div className="px-4 pb-4">
+              {fighting[f.id] && f.answer === "fight" && <p className="mt-3 rounded-lg bg-rose-500/10 px-3 py-2 text-xs text-rose-100">⚔️ Your army is waiting on the shore.</p>}
+              {f.answer === "shields" && <p className="mt-3 rounded-lg bg-sky-400/10 px-3 py-2 text-xs text-sky-100">🛡️ Shields up: your defence is half as strong again.</p>}
+              {errors[f.id] && (
+                <p role="alert" className="mt-3 text-xs text-rose-300">
+                  {errors[f.id]}
+                </p>
+              )}
+              {!decided && (
+                <>
+                  <div className="mt-3 grid grid-cols-3 gap-2">
+                    {options.map((o) => (
+                      <button
+                        key={o.id}
+                        disabled={busy === f.id || o.off}
+                        onClick={() => pick(o.id)}
+                        className={`flex flex-col items-center rounded-xl bg-gradient-to-b px-2 py-2.5 text-center ring-1 transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-35 ${o.tone}`}
+                      >
+                        <span className="text-xl">{o.icon}</span>
+                        <span className="mt-1 text-xs font-bold text-white">{o.title}</span>
+                        <span className="mt-0.5 text-[9.5px] leading-tight text-white/55">{o.sub}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-2 text-center text-[10.5px] text-white/40">
+                    No answer means your people fight · you have {Math.floor(sim.devotion)} devotion
+                  </p>
+                </>
+              )}
+            </div>
           </section>
         );
       })}

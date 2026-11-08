@@ -548,7 +548,7 @@ export default function Galaxy({
             planets={shown}
             spacefaring={spacefaring}
             onInvade={invade}
-            military={sim.soldiers()}
+            sim={sim}
             outgoing={fleets.ready ? fleets.outgoing : []}
           />
         )}
