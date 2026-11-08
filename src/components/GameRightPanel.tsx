@@ -64,7 +64,6 @@ export function GameRightPanel({
   link,
   spacefaring,
   onOpenGalaxy,
-  onOpenLeader,
   chronicle,
   busy,
   nationColors,
@@ -86,7 +85,6 @@ export function GameRightPanel({
   link: GalaxyStatus;
   spacefaring: boolean;
   onOpenGalaxy: (view: "join" | "invade" | "market" | "offers") => void;
-  onOpenLeader: () => void;
   chronicle: (ChronicleEntry & { nation?: number })[];
   busy: "" | "narrating" | "thinking";
   nationColors: { name: string; color: string }[];
@@ -113,12 +111,7 @@ export function GameRightPanel({
             link={link}
           />
         </div>
-        <button
-          onClick={onOpenLeader}
-          disabled={!nation.alive}
-          className="flex w-full items-center gap-3 rounded-xl bg-white/5 p-2 text-left transition hover:bg-white/10 disabled:opacity-40"
-          title="Hold an audience with their leader"
-        >
+        <div className={`flex w-full items-center gap-3 rounded-xl bg-white/5 p-2 text-left ${nation.alive ? "" : "opacity-40"}`}>
           <span className="shrink-0 overflow-hidden rounded-lg">
             <Portrait race={nation.race} seed={nation.leader.seed} color={nation.color} mood={mood} size={52} />
           </span>
@@ -129,9 +122,8 @@ export function GameRightPanel({
             <span className="block text-xs text-white/55">
               {RACE[nation.race].icon} {RACE[nation.race].name} · {ERAS[nation.era]}
             </span>
-            <span className="block text-xs text-sky-300">Talk to the leader</span>
           </span>
-        </button>
+        </div>
         <NeedBars needs={nation.needs} love={nation.love} />
         {civ ? (
           <>
