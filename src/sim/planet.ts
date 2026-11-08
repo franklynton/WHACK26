@@ -821,7 +821,7 @@ export class PlanetSim {
         const free = this.owner[p.face] < 0 || this.owner[p.face] === p.nation;
         const own = this.villages.find((v) => v.nation === p.nation && this.angle(v.face, p.face) < VILLAGE_RANGE * 0.5);
         if (own) p.village = own.id;
-        else if (free && this.joinsUp(p.face, p.nation) && (this.terrain[p.face] === T.Grass || this.terrain[p.face] === T.Forest || this.terrain[p.face] === T.Sand)) p.village = this.foundVillage(p.face, p.nation).id;
+        else if (free && this.joinsUp(p.face, p.nation) && this.roomFor(p.face, p.nation) && (this.terrain[p.face] === T.Grass || this.terrain[p.face] === T.Forest || this.terrain[p.face] === T.Sand)) p.village = this.foundVillage(p.face, p.nation).id;
         p.goal = undefined;
       }
       const march = target[p.nation];
@@ -831,6 +831,9 @@ export class PlanetSim {
       for (let k = 0; k < 3; k++) {
         const nb = this.neighbours[p.face * 3 + k];
         if (!walkable(this.terrain[nb] as T) || this.fire[nb] > 0) continue;
+        // People stay in their own nation's land (or unclaimed land); only soldiers at war cross borders.
+        const foreign = this.owner[nb] >= 0 && this.owner[nb] !== p.nation && this.owner[p.face] !== this.owner[nb];
+        if (foreign && !(marching && this.atWar(p.nation, this.owner[nb]))) continue;
         const roam = pol === "explore" ? 2 : 0.6;
         const score = p.goal !== undefined
           ? this.dot(nb, p.goal) * 10 + Math.random() * 0.2
@@ -860,7 +863,7 @@ export class PlanetSim {
         const near = this.villages.find((v) => v.nation === p.nation && this.angle(v.face, p.face) < range);
         const claimed = this.owner[p.face] >= 0 && this.owner[p.face] !== p.nation;
         if (near) p.village = near.id;
-        else if (!claimed && this.joinsUp(p.face, p.nation) && (this.terrain[p.face] === T.Grass || this.terrain[p.face] === T.Forest) && Math.random() < (pol === "expand" ? 0.15 : 0.04)) {
+        else if (!claimed && this.joinsUp(p.face, p.nation) && this.roomFor(p.face, p.nation) && (this.terrain[p.face] === T.Grass || this.terrain[p.face] === T.Forest) && Math.random() < (pol === "expand" ? 0.15 : 0.04)) {
           const v = this.foundVillage(p.face, p.nation);
           p.village = v.id;
         }
@@ -1688,6 +1691,11 @@ export class PlanetSim {
     }
   }
 
+  // No settling right next to another nation's village: each people keeps to its own area.
+  private roomFor(f: number, nation: number) {
+    return !this.villages.some((v) => v.nation !== nation && this.angle(v.face, f) < VILLAGE_RANGE * 0.6);
+  }
+
   // Can this nation found a settlement here without leaving a gap? Its first one can go anywhere;
   // after that, only on or right next to its own land.
   private joinsUp(f: number, nation: number) {
@@ -1914,13 +1922,14 @@ export class PlanetSim {
   private alertQueue: Alert[] = [];
   private announce(icon: string, title: string, text: string, face: number, minor = false) {
     if (minor && this.alert && this.year - this.alert.at < MINOR_ALERT_GAP) return;
+    if (minor && this.demo) return; // the demo only pops up big news (routine news is still in the chronicle)
     const next = { icon, title, text, at: this.year, face };
     const busy = this.alert && Date.now() - (this.alert.shown ?? 0) < ALERT_MS;
     if (!busy) this.alert = { ...next, shown: Date.now() };
     else if (!minor) {
       // Big news waits its turn (at most 2 waiting; older routine news makes way).
       this.alertQueue.push(next);
-      if (this.alertQueue.length > 2) this.alertQueue.shift();
+      if (this.alertQueue.length > (this.demo ? 1 : 2)) this.alertQueue.shift();
     } // routine news while a pop-up is up is simply skipped (it's still in the chronicle)
     if (!minor && DISASTER_ICONS.has(icon)) this.offer("disaster", title, text, face, [...this.nationsIn(this.tilesNear(face, 0.2).map(([f]) => f))]);
   }
