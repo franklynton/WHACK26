@@ -74,7 +74,10 @@ export async function GET(req: Request) {
   let galaxy: string | null = null;
   let me: { galaxy?: string | null; credits?: number; resources?: Record<string, number> } | null = null;
   if (worldId) {
-    const { data: planetData, error } = await supabase.from("planets").select("galaxy, credits, resources").eq("world_id", worldId).maybeSingle();
+    // Only a missing `galaxy` column (migration 003) means "no rooms". A database without the market's
+    // `credits` column (004) still has rooms, so a god only ever sees the planets in their own galaxy.
+    let { data: planetData, error } = await supabase.from("planets").select("galaxy, credits, resources").eq("world_id", worldId).maybeSingle();
+    if (notMigrated(error)) ({ data: planetData, error } = await supabase.from("planets").select("galaxy, resources").eq("world_id", worldId).maybeSingle());
     if (notMigrated(error)) rooms = false;
     else if (error?.code === "PGRST205" || error?.message?.includes("public.planets")) {
       return NextResponse.json({ error: "Galaxy migration not applied: public.planets is missing", enabled: false }, { status: 503 });
