@@ -5,7 +5,13 @@ import type { GalaxyStatus } from "./Galaxy";
 import Portrait, { type Mood } from "./Portrait";
 import { SettingsPopover } from "./GamePanels";
 import { ERAS, RACE } from "@/sim/races";
-import type { ChronicleEntry, Civ, NationInfo, Needs, Policy } from "@/types/world";
+import type {
+  ChronicleEntry,
+  Civ,
+  NationInfo,
+  Needs,
+  Policy,
+} from "@/types/world";
 
 export const cap = (value: string) => value[0].toUpperCase() + value.slice(1);
 
@@ -93,7 +99,10 @@ export function GameRightPanel({
       <div className="mb-3 space-y-2 border-b border-white/10 pb-3 text-sm">
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
-            <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: nation.color }} />
+            <span
+              className="h-3 w-3 shrink-0 rounded-full"
+              style={{ background: nation.color }}
+            />
             <p className="truncate text-lg font-semibold">{cap(nation.name)}</p>
           </div>
           <SettingsPopover
@@ -109,16 +118,25 @@ export function GameRightPanel({
             link={link}
           />
         </div>
-        <div className={`flex w-full items-center gap-3 rounded-xl bg-white/5 p-2 text-left ${nation.alive ? "" : "opacity-40"}`}>
+        <div
+          className={`flex w-full items-center gap-3 rounded-xl bg-white/5 p-2 text-left ${nation.alive ? "" : "opacity-40"}`}
+        >
           <span className="shrink-0 overflow-hidden rounded-lg">
-            <Portrait race={nation.race} seed={nation.leader.seed} color={nation.color} mood={mood} size={52} />
+            <Portrait
+              race={nation.race}
+              seed={nation.leader.seed}
+              color={nation.color}
+              mood={mood}
+              size={52}
+            />
           </span>
           <span className="min-w-0">
             <span className="block truncate text-sm font-semibold">
               {nation.leader.title} {nation.leader.name}
             </span>
             <span className="block text-xs text-white/55">
-              {RACE[nation.race].icon} {RACE[nation.race].name} · {ERAS[nation.era]}
+              {RACE[nation.race].icon} {RACE[nation.race].name} ·{" "}
+              {ERAS[nation.era]}
             </span>
           </span>
         </div>
@@ -127,13 +145,17 @@ export function GameRightPanel({
           <>
             <div className="hud-meta-row">
               <span className="hud-meta-label">Crisis</span>
-              <span className={`hud-meta-value ${nation.crisis ? "!text-rose-300" : "text-white/45"}`}>
+              <span
+                className={`hud-meta-value ${nation.crisis ? "!text-rose-300" : "text-white/45"}`}
+              >
                 {nation.crisis ? cap(nation.crisis) : "None"}
               </span>
             </div>
             <div className="hud-meta-row">
               <span className="hud-meta-label">Focus</span>
-              <span className={`hud-meta-value ${nation.policy === "rebel" ? "text-rose-300" : ""}`}>
+              <span
+                className={`hud-meta-value ${nation.policy === "rebel" ? "text-rose-300" : ""}`}
+              >
                 {POLICY_LABEL[nation.policy]}
               </span>
               {reason && <span className="hud-meta-note">{reason}</span>}
@@ -145,36 +167,47 @@ export function GameRightPanel({
             <div className="hud-meta-row">
               <span className="hud-meta-label">Their belief</span>
               <span className="hud-meta-note text-white/70">
-                They call you <b>{civ.religion.godName}</b>. {civ.religion.belief}
+                They call you <b>{civ.religion.godName}</b>.{" "}
+                {civ.religion.belief}
               </span>
             </div>
             <div className="hud-meta-row">
               <span className="hud-meta-label">Attitude</span>
-              <span className={`hud-meta-value ${civ.attitude === "hostile" || civ.attitude === "resentful" ? "text-rose-300" : ""}`}>
+              <span
+                className={`hud-meta-value ${civ.attitude === "hostile" || civ.attitude === "resentful" ? "text-rose-300" : ""}`}
+              >
                 {cap(civ.attitude)}
               </span>
             </div>
           </>
         ) : (
-          <p className="text-white/50">{nation.alive ? "They do not know you yet." : "This nation is gone."}</p>
+          <p className="text-white/50">
+            {nation.alive
+              ? "They do not know you yet."
+              : "This nation is gone."}
+          </p>
         )}
       </div>
 
       <div className="mb-4 border-b border-white/10 pb-4">
-        <p className="label mb-2">Galaxy</p>
+        <div className="mb-2 flex items-center justify-between">
+          <p className="label">Galaxy</p>
+          <span className="text-[10px] text-white/35">
+            {link.galaxy ? "Connected" : "Not connected"}
+          </span>
+        </div>
         <div className="grid grid-cols-3 gap-2">
-          {([
-            ["invade", "", "Invade", "Launch an attack"],
-            ["market", "", "Market", "Trade resources"],
-            ["offers", "", "Offers", "Swap with a god"],
-          ] as const).map(([view, icon, label, action]) => {
+          {(
+            [
+              ["invade", "⚔", "Invade", "Launch an attack"],
+              ["market", "◈", "Market", "Trade resources"],
+              ["offers", "⇄", "Offers", "Swap with a god"],
+            ] as const
+          ).map(([view, icon, label, action]) => {
             const disabled = view === "invade" ? false : !link.galaxy;
-            const className =
-              view === "invade"
-                ? "group rounded-lg border border-rose-300/15 bg-rose-400/10 px-3 py-3 text-left text-rose-100 transition hover:border-rose-300/30 hover:bg-rose-400/20"
-                : view === "market"
-                  ? "group rounded-lg border border-amber-300/15 bg-amber-400/10 px-3 py-3 text-left transition hover:border-amber-300/30 hover:bg-amber-400/20 disabled:cursor-not-allowed disabled:border-white/5 disabled:bg-white/[0.03] disabled:text-white/30"
-                  : "group rounded-lg border border-sky-300/15 bg-sky-400/10 px-3 py-3 text-left transition hover:border-sky-300/30 hover:bg-sky-400/20 disabled:cursor-not-allowed disabled:border-white/5 disabled:bg-white/[0.03] disabled:text-white/30";
+            const className = `group rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-2.5 text-left transition hover:border-white/20 hover:bg-white/[0.09] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200/50 ${
+              disabled ? "cursor-not-allowed opacity-40" : ""
+            }`;
             return (
               <button
                 key={view}
@@ -197,10 +230,20 @@ export function GameRightPanel({
                         : "Offer a swap to another god"
                 }
               >
-                {icon && <span className="block text-lg">{icon}</span>}
-                <span className="mt-1 block text-sm font-semibold">{label}</span>
-                <span className="block text-[10px] text-current opacity-60">
-                  {!link.galaxy ? "Join a galaxy first" : view === "invade" && !spacefaring ? "Space Age required" : action}
+                {icon && (
+                  <span className="block text-sm text-white/40" aria-hidden="true">
+                    {icon}
+                  </span>
+                )}
+                <span className="block text-sm font-semibold text-white/85">
+                  {label}
+                </span>
+                <span className="mt-0.5 block text-[10px] leading-snug text-white/45">
+                  {!link.galaxy
+                    ? "Join a galaxy first"
+                    : view === "invade" && !spacefaring
+                      ? "Space Age required"
+                      : action}
                 </span>
               </button>
             );
@@ -208,10 +251,31 @@ export function GameRightPanel({
         </div>
         <button
           onClick={() => onOpenGalaxy("join")}
-          className={`mt-2 w-full rounded-lg px-3 py-2 text-sm font-semibold transition ${link.galaxy ? "bg-indigo-400/15 text-indigo-100 hover:bg-indigo-400/25" : "bg-indigo-400/30 text-white hover:bg-indigo-400/40"}`}
+          className={`mt-2 flex w-full items-center rounded-lg border px-3 py-2 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200/50 ${
+            link.galaxy
+              ? "border-indigo-200/20 bg-indigo-300/[0.06] text-white/85 hover:border-indigo-200/45 hover:bg-indigo-300/[0.12]"
+              : "border-sky-200/25 bg-sky-300/10 text-white hover:border-sky-200/40 hover:bg-sky-300/15"
+          }`}
         >
-          {link.galaxy ? `Galaxy ${link.galaxy} · Manage` : "Join a galaxy"}
+          <span className="flex items-center gap-2 text-sm font-semibold">
+            {link.galaxy && (
+              <span className="text-sm text-white/55" aria-hidden="true">
+                ⚙
+              </span>
+            )}
+            {link.galaxy ? "Manage galaxy" : "Join a galaxy"}
+          </span>
         </button>
+        {link.galaxy && (
+          <div className="mt-2 rounded-lg border border-white/10 bg-black/10 px-3 py-2">
+            <p className="text-[10px] uppercase tracking-wider text-white/40">
+              Connection code
+            </p>
+            <p className="mt-1 truncate font-mono text-sm font-semibold tracking-[0.18em] text-white/85">
+              {link.galaxy}
+            </p>
+          </div>
+        )}
       </div>
 
       <div className="mt-auto flex min-h-0 flex-1 flex-col border-t border-white/10 pt-3">
@@ -223,35 +287,45 @@ export function GameRightPanel({
           <span>
             <span className="label block">Chronicle Book</span>
             <span className="mt-1 block text-xs text-white/55">
-              {chronicle.length ? "Recent events from your world" : "The story of this world will appear here."}
+              {chronicle.length
+                ? "Recent events from your world"
+                : "The story of this world will appear here."}
             </span>
           </span>
         </button>
         <div className="subtle-scrollbar mt-2 min-h-0 flex-1 overflow-y-auto rounded-lg border border-white/5 bg-black/10 px-2">
           {chronicle.length ? (
             <div className="divide-y divide-white/[0.07]">
-              {[...chronicle].reverse().slice(0, 6).map((entry, index) => (
-                <button
-                  key={`${entry.year}-${index}-${entry.text}`}
-                  type="button"
-                  onClick={onOpenChronicle}
-                  className="block w-full py-2 text-left transition hover:text-white"
-                >
-                  <span className="block text-[10px] uppercase tracking-wider text-sky-200/55">
-                    Year {Math.floor(entry.year)}
-                  </span>
-                  <span className="mt-0.5 block text-xs leading-relaxed text-white/65">{entry.text}</span>
-                </button>
-              ))}
+              {[...chronicle]
+                .reverse()
+                .slice(0, 6)
+                .map((entry, index) => (
+                  <button
+                    key={`${entry.year}-${index}-${entry.text}`}
+                    type="button"
+                    onClick={onOpenChronicle}
+                    className="block w-full py-2 text-left transition hover:text-white"
+                  >
+                    <span className="block text-[10px] uppercase tracking-wider text-sky-200/55">
+                      Year {Math.floor(entry.year)}
+                    </span>
+                    <span className="mt-0.5 block text-xs leading-relaxed text-white/65">
+                      {entry.text}
+                    </span>
+                  </button>
+                ))}
             </div>
           ) : (
             <p className="p-3 text-xs leading-relaxed text-white/40">
-              New events will be recorded here as your nations settle, worship, and struggle.
+              New events will be recorded here as your nations settle, worship,
+              and struggle.
             </p>
           )}
         </div>
         {busy === "narrating" && (
-          <span className="mt-1 block shrink-0 text-right text-[10px] uppercase tracking-wider text-amber-200/60 animate-pulse">Writing…</span>
+          <span className="mt-1 block shrink-0 text-right text-[10px] uppercase tracking-wider text-amber-200/60 animate-pulse">
+            Writing…
+          </span>
         )}
       </div>
     </aside>
