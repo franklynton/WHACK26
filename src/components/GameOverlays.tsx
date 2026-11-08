@@ -1,6 +1,6 @@
 "use client";
 
-import { CHOICE_LIFE, MIRACLES, PRAYER_LIFE, type MiracleId } from "@/sim/planet";
+import { ALERT_MS, CHOICE_LIFE, MIRACLES, PRAYER_LIFE, type MiracleId } from "@/sim/planet";
 import type { Hud } from "./Game";
 import type { NationInfo } from "@/types/world";
 
@@ -45,7 +45,7 @@ export function GameOverlays({
   const choice = hud.god.choice;
   return (
     <>
-      {hud.alert && hud.year - hud.alert.at < 7 && (
+      {hud.alert && Date.now() - (hud.alert.shown ?? 0) < ALERT_MS && (
         <div className="pointer-events-none absolute top-4 left-[17.5rem] right-[19.5rem] z-40 flex justify-center">
           <div key={hud.alert.at} className="glass alert-pop pointer-events-auto flex max-w-lg items-center gap-3 px-5 py-3">
             <span className="text-3xl leading-none">{hud.alert.icon}</span>
