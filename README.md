@@ -1,46 +1,58 @@
 # Arda
 
-A god game on your own 3D planet, built for WHACK26. Tiny AI-driven people live on it, worship you, talk back, and decide what to do next. Keep them at peace, grow your resources, and trade with (or invade) other gods' planets.
+**[▶ Play it live](https://arda-frank-3129.vercel.app)** · Built in 24 hours at WHACK26 by a team of four
 
-## Team and tracks
+A god game on your own 3D planet. Tiny AI-driven nations live on it, invent a religion about you,
+pray to you, trade, go to war and climb from the Stone Age to the Space Age. Your job is to
+keep your people alive and loved for 30 years. Once you reach space, you can trade with or invade
+other players' planets in a shared galaxy.
 
-| Who | Track | Issue |
-| --- | --- | --- |
-| @franklynton | Nations and war | [#3](https://github.com/franklynton/WHACK26/issues/3) |
-| @shash-v | Database and multiplayer | [#4](https://github.com/franklynton/WHACK26/issues/4) |
-| @linaslabs | Economy and upgrades | [#5](https://github.com/franklynton/WHACK26/issues/5) |
-| @piyushgurnani06 | AI voice, polish and pitch | [#6](https://github.com/franklynton/WHACK26/issues/6) |
+![Arda gameplay](docs/screenshots/arda.jpg)
 
-**Start here:** read [docs/PLAN.md](docs/PLAN.md) for the full plan and timeline, then your issue's checklist. [CLAUDE.md](CLAUDE.md) maps every file in the code.
+## Features
 
-Feature freeze is **Sunday 03:30**, and the backup demo video is due by **Sunday 08:00** (UK time).
+- **A 3D planet** of about 27,000 tiles with elevation, moisture, forests and ore, gold and herb deposits.
+  Five planet types (Verdant, Timberworld, Ironworld, Gilded, Archipelago) are each rich in different
+  resources and prone to different disasters.
+- **Nations with their own minds.** Each planet starts with 2–5 nations, each a different race (human,
+  goblin, elf, dwarf, lizardfolk) with its own leader, borders, needs and relations with its neighbours.
+  An LLM gives each nation a name, a religion and a voice. It talks to you, and it picks a policy
+  (expand, farm, worship, hoard, rebel and so on) that changes how its people behave.
+- **Peace, trade and war.** Tension between nations drives them between peace, trade, rivalry and war.
+  At war, border villages are captured and resources fall. Warships, merchant fleets and pirates sail between them.
+- **God powers** paid for with devotion: bless harvests, send rain, calm a revolution, smite, answer prayers,
+  or step in when a disaster, war or revolution starts.
+- **A multiplayer galaxy.** Up to five gods share a galaxy by code. Planets sync every five seconds, and
+  Space Age nations can trade through a shared order book, make direct offers, or launch invasion fleets
+  that the defender can fight, pay off or shield against. All of this is settled server-side in Postgres.
+- **It works without an API key.** Every AI call has a pre-written fallback, so the game never stalls.
 
-## Run it
+## Tech
+
+Next.js 15 (App Router), React 19, TypeScript, Tailwind CSS 4, react-three-fiber and drei for the globe,
+Supabase (Postgres functions and row-level security) for the galaxy, OpenRouter for the AI, deployed on Vercel.
+
+- `src/sim/planet.ts`: the whole simulation (tiles, people, villages, nations, disasters, navies), stepped every frame
+- `src/components/Globe.tsx`: renders the planet with instanced meshes and turns mouse drags into god powers
+- `src/app/api/`: server routes for the AI (the key never reaches the browser) and the galaxy
+- `supabase/migrations/`: galaxy rooms, market, trade offers and invasions as SQL functions
+
+## Team
+
+| | Built |
+| --- | --- |
+| [Frank Lynton](https://github.com/franklynton) | Project lead and integration; nations, war, races and the core simulation |
+| [Shash](https://github.com/shash-v) | Database, multiplayer galaxy and the market order book |
+| [Abel Linas](https://github.com/linaslabs) | Economy, upgrades and balancing |
+| [Piyush Gurnani](https://github.com/piyushgurnani06) | AI voice, effects, polish and the pitch |
+
+## Run it locally
 
 ```bash
 npm install
-cp .env.example .env.local   # add your OpenRouter key (optional: without one the people use pre-written lines)
+cp .env.example .env.local   # optional: add an OpenRouter key for live AI dialogue
 npm run dev
 ```
 
-Open http://localhost:3000, enter your name and create your planet.
-
-## Multiplayer galaxy
-
-1. Create a Supabase project.
-2. Copy the project URL and anon/service-role keys into `.env.local`:
-   ```bash
-   NEXT_PUBLIC_SUPABASE_URL=...
-   NEXT_PUBLIC_SUPABASE_ANON_KEY=...
-   SUPABASE_SERVICE_ROLE_KEY=...
-   ```
-3. Run every file in `supabase/migrations/` in number order (`001` to `012`) in the Supabase SQL editor. Each is safe to run again.
-4. Add the same three variables to the Vercel project's environment variables.
-
-Every planet syncs to the galaxy every five seconds. Galaxies are temporary rooms of up to 5 gods, named by a code (set on the landing page, in the Galaxy panel, or with a `/?galaxy=CODE` link). The first god to use a code creates the galaxy, others join until it's full, and anyone can leave at any time. A god who stops syncing for 30 seconds is dropped, and an empty galaxy is deleted, so its code can be used again. Leaving never undoes what trades or invasions did to your planet. Once your nation reaches the Space Age, you can send resources to, or invade, any planet in your galaxy. Server-side SQL functions validate tokens, amounts and invasion cooldowns, and the result lands in both games (the other player's planet gets the resources, or loses people and gold).
-
-## How we work
-
-- One branch per track (`nations`, `multiplayer`, `economy`, `polish`), with small PRs into `main`.
-- Run `npm run build` before pushing. Vercel redeploys on every merge to `main` and builds a preview for every PR.
-- Never commit keys.
+Open http://localhost:3000, name yourself and create your planet. For multiplayer, create a Supabase project,
+add its URL and keys to `.env.local` (see `.env.example`), and run the files in `supabase/migrations/` in order.
