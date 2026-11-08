@@ -66,7 +66,6 @@ export function GameRightPanel({
   onOpenGalaxy,
   chronicle,
   busy,
-  nationColors,
   onOpenChronicle,
 }: {
   nation: NationInfo;
@@ -87,7 +86,6 @@ export function GameRightPanel({
   onOpenGalaxy: (view: "join" | "invade" | "market" | "offers") => void;
   chronicle: (ChronicleEntry & { nation?: number })[];
   busy: "" | "narrating" | "thinking";
-  nationColors: { name: string; color: string }[];
   onOpenChronicle: () => void;
 }) {
   return (
@@ -216,24 +214,46 @@ export function GameRightPanel({
         </button>
       </div>
 
-      <button
-        type="button"
-        onClick={onOpenChronicle}
-        className="group -mx-1 flex w-[calc(100%+0.5rem)] items-center justify-between rounded-xl border border-white/0 px-2 py-2 text-left transition hover:border-white/10 hover:bg-white/[0.04]"
-      >
-        <span>
-          <span className="label block">Chronicle Book</span>
-          <span className="mt-1 block max-w-56 truncate text-xs text-white/55">
-            {chronicle.length ? [...chronicle].reverse()[0].text : "The story of this world will appear here."}
+      <div className="mt-auto flex min-h-0 flex-1 flex-col border-t border-white/10 pt-3">
+        <button
+          type="button"
+          onClick={onOpenChronicle}
+          className="group -mx-1 flex shrink-0 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 text-left transition hover:border-sky-200/30 hover:bg-sky-200/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200/50"
+        >
+          <span>
+            <span className="label block">Chronicle Book</span>
+            <span className="mt-1 block text-xs text-white/55">
+              {chronicle.length ? "Recent events from your world" : "The story of this world will appear here."}
+            </span>
           </span>
-        </span>
-        <span className="ml-3 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-white/60 transition group-hover:bg-white/10 group-hover:text-white">
-          →
-        </span>
-      </button>
-      {busy === "narrating" && (
-        <span className="mt-1 block text-right text-[10px] uppercase tracking-wider text-amber-200/60 animate-pulse">Writing…</span>
-      )}
+        </button>
+        <div className="subtle-scrollbar mt-2 min-h-0 flex-1 overflow-y-auto rounded-lg border border-white/5 bg-black/10 px-2">
+          {chronicle.length ? (
+            <div className="divide-y divide-white/[0.07]">
+              {[...chronicle].reverse().slice(0, 6).map((entry, index) => (
+                <button
+                  key={`${entry.year}-${index}-${entry.text}`}
+                  type="button"
+                  onClick={onOpenChronicle}
+                  className="block w-full py-2 text-left transition hover:text-white"
+                >
+                  <span className="block text-[10px] uppercase tracking-wider text-sky-200/55">
+                    Year {Math.floor(entry.year)}
+                  </span>
+                  <span className="mt-0.5 block text-xs leading-relaxed text-white/65">{entry.text}</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="p-3 text-xs leading-relaxed text-white/40">
+              New events will be recorded here as your nations settle, worship, and struggle.
+            </p>
+          )}
+        </div>
+        {busy === "narrating" && (
+          <span className="mt-1 block shrink-0 text-right text-[10px] uppercase tracking-wider text-amber-200/60 animate-pulse">Writing…</span>
+        )}
+      </div>
     </aside>
   );
 }

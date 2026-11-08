@@ -102,26 +102,35 @@ export function GameOverlays({
             </button>
           </div>
         ))}
-        <div className="glass pointer-events-auto flex gap-1.5 p-1.5">
-          {MIRACLES.map((miracleInfo) => {
-            const wait = Math.ceil(hud.god.ready[miracleInfo.id] - hud.year);
-            const off = wait > 0 || hud.god.devotion < miracleInfo.cost;
-            return (
-              <button
-                key={miracleInfo.id}
-                onClick={() => onMiracle(miracleInfo.id)}
-                disabled={off && miracle !== miracleInfo.id}
-                title={miracleInfo.blurb}
-                className={`relative w-24 rounded-lg px-2 py-1.5 text-center transition disabled:opacity-40 ${miracle === miracleInfo.id ? "bg-amber-300/30 ring-1 ring-amber-200" : "bg-white/5 hover:bg-white/10"}`}
-              >
-                <div className="text-lg leading-none">{miracleInfo.icon}</div>
-                <div className="mt-0.5 text-[11px] font-semibold">{miracleInfo.name}</div>
-                <div className="text-[10px] text-amber-200/80">
-                  {wait > 0 ? `ready in ${wait}s` : `✨ ${miracleInfo.cost}`}
-                </div>
-              </button>
-            );
-          })}
+        <div className="flex items-center gap-2">
+          <div
+            className="glass pointer-events-auto rounded-xl border-amber-200/20 bg-amber-300/10 px-3 py-2 text-center"
+            title="Nations earn devotion through worship and love. Spend it on miracles."
+          >
+            <div className="text-[10px] uppercase tracking-wider text-amber-200/70">Devotion</div>
+            <div className="text-lg font-bold tabular-nums text-amber-100">✨ {Math.floor(hud.god.devotion)}</div>
+          </div>
+          <div className="glass pointer-events-auto flex gap-1.5 p-1.5">
+            {MIRACLES.map((miracleInfo) => {
+              const wait = Math.ceil(hud.god.ready[miracleInfo.id] - hud.year);
+              const off = wait > 0 || hud.god.devotion < miracleInfo.cost;
+              return (
+                <button
+                  key={miracleInfo.id}
+                  onClick={() => onMiracle(miracleInfo.id)}
+                  disabled={off && miracle !== miracleInfo.id}
+                  title={miracleInfo.blurb}
+                  className={`relative w-24 rounded-lg px-2 py-1.5 text-center transition disabled:opacity-40 ${miracle === miracleInfo.id ? "bg-amber-300/30 ring-1 ring-amber-200" : "bg-white/5 hover:bg-white/10"}`}
+                >
+                  <div className="text-lg leading-none">{miracleInfo.icon}</div>
+                  <div className="mt-0.5 text-[11px] font-semibold">{miracleInfo.name}</div>
+                  <div className="text-[10px] text-amber-200/80">
+                    {wait > 0 ? `ready in ${wait}s` : `✨ ${miracleInfo.cost}`}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
         </div>
         <p className="text-xs text-white/40">
           {miracle ? "Click the land to cast · Esc to cancel" : "Drag to rotate · scroll to zoom · pick a miracle, then click the land"}

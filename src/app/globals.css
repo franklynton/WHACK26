@@ -29,6 +29,9 @@ body {
   scrollbar-color: rgba(148, 163, 184, 0.42) transparent;
   scrollbar-width: thin;
 }
+.stable-scrollbar {
+  scrollbar-gutter: stable;
+}
 .subtle-scrollbar::-webkit-scrollbar {
   width: 7px;
   height: 7px;

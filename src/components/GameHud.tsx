@@ -84,17 +84,6 @@ export function PlanetSummary({
         </div>
       </div>
       <div
-        className="mb-2 rounded-lg bg-amber-300/10 px-2.5 py-1.5"
-        title="Nations earn devotion through worship and love."
-      >
-        <p className="text-[10px] uppercase tracking-wider text-amber-200/70">
-          Devotion
-        </p>
-        <p className="text-xl font-bold tabular-nums">
-          ✨ {Math.floor(hud.god.devotion)}
-        </p>
-      </div>
-      <div
         className="mb-2 rounded-lg border border-white/10 px-2.5 py-2 text-xs"
         title="Lose if your people fall, or if every nation comes to hate you."
       >

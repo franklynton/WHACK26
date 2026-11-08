@@ -2,13 +2,11 @@
 
 import type { RefObject } from "react";
 import type { PlanetSim } from "@/sim/planet";
-import { GOAL_YEAR, UPGRADES } from "@/sim/planet";
+import { UPGRADES } from "@/sim/planet";
 import { ERAS, RACE } from "@/sim/races";
 import type { GalaxyStatus } from "./Galaxy";
 import type {
-  Crisis,
   NationInfo,
-  Needs,
   Policy,
   Relation,
   Resources,
@@ -30,10 +28,10 @@ const RELATION_STYLE: Record<
   Relation,
   { icon: string; cls: string; label: string }
 > = {
-  peace: { icon: "·", cls: "text-white/40", label: "at peace" },
-  trade: { icon: "🤝", cls: "text-emerald-300", label: "trading" },
-  rival: { icon: "😠", cls: "text-amber-300", label: "rivals" },
-  war: { icon: "⚔️", cls: "text-rose-300", label: "at war" },
+  peace: { icon: "·", cls: "text-white/40", label: "Peaceful" },
+  trade: { icon: "🤝", cls: "text-emerald-300", label: "Trading" },
+  rival: { icon: "😠", cls: "text-amber-300", label: "Rivals" },
+  war: { icon: "⚔️", cls: "text-rose-300", label: "Enemies" },
 };
 
 export function NationList({
@@ -90,21 +88,34 @@ export function NationList({
                     <span className="flex-1 truncate font-medium">
                       {cap(nation.name)}
                     </span>
-                    <span className="hidden max-w-16 truncate text-xs text-amber-200/60 sm:block">
-                      {ERAS[nation.era]}
-                    </span>
-                    <span className="text-xs tabular-nums text-white/50">
+                    {nation.crisis && (
+                      <span
+                        className="h-2 w-2 shrink-0 rounded-full bg-rose-400 shadow-[0_0_8px_rgba(251,113,133,0.8)]"
+                        title={`${cap(nation.crisis)} needs attention`}
+                        aria-label={`${cap(nation.crisis)} needs attention`}
+                      />
+                    )}
+                    <span className="flex items-center gap-1 text-xs tabular-nums text-white/60" title="People">
+                      <svg
+                        aria-hidden="true"
+                        className="h-3.5 w-3.5 text-slate-400"
+                        viewBox="0 0 16 16"
+                        fill="currentColor"
+                      >
+                        <path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm0-1.25a1.75 1.75 0 1 1 0-3.5 1.75 1.75 0 0 1 0 3.5ZM2.5 14.25a5.5 5.5 0 0 1 11 0 .75.75 0 0 1-1.5 0 4 4 0 0 0-8 0 .75.75 0 0 1-1.5 0Z" />
+                      </svg>
                       {nation.population}
                     </span>
                   </button>
                   <button
                     onClick={() => onToggle(nation.id)}
-                    className="mr-1 grid h-7 w-7 shrink-0 place-items-center rounded-md text-xs text-white/45 transition hover:bg-white/10 hover:text-white/80"
+                    className="mr-1 grid h-6 w-5 shrink-0 place-items-center text-white/55 transition hover:text-white"
                     aria-expanded={expanded === nation.id}
                     aria-label={`${expanded === nation.id ? "Hide" : "Show"} details for ${cap(nation.name)}`}
                   >
                     <span
-                      className={`transition-transform ${
+                      aria-hidden="true"
+                      className={`text-base leading-none transition-transform ${
                         expanded === nation.id ? "rotate-180" : ""
                       }`}
                     >
@@ -114,36 +125,59 @@ export function NationList({
                 </div>
                 {expanded === nation.id && (
                   <div className="mx-2 mb-2 border-t border-white/10 px-1 pt-2 text-xs text-white/60">
-                    <div className="flex flex-wrap gap-x-3 gap-y-1">
-                      <span>
-                        {nation.villages}{" "}
-                        {nation.villages === 1 ? "village" : "villages"}
-                      </span>
-                      <span>{POLICY_LABEL[nation.policy]}</span>
-                      {!!nation.ships && <span>⚓ {nation.ships} ships</span>}
-                      {nation.crisis && (
-                        <span className="font-semibold uppercase text-rose-300">
-                          {nation.crisis}
-                        </span>
+                    <dl className="space-y-1.5">
+                      <div className="flex items-center justify-between gap-3">
+                        <dt className="text-white/40">Era</dt>
+                        <dd className="font-medium text-amber-200/80">{ERAS[nation.era]}</dd>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <dt className="text-white/40">Settlements</dt>
+                        <dd>{nation.villages} {nation.villages === 1 ? "village" : "villages"}</dd>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <dt className="text-white/40">Current focus</dt>
+                        <dd className="text-right">{POLICY_LABEL[nation.policy]}</dd>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <dt className="text-white/40">Leader</dt>
+                        <dd className="text-right">{nation.leader.title} {nation.leader.name}</dd>
+                      </div>
+                      {!!nation.ships && (
+                        <div className="flex items-center justify-between gap-3">
+                          <dt className="text-white/40">Fleet</dt>
+                          <dd>⚓ {nation.ships} ships</dd>
+                        </div>
                       )}
-                    </div>
-                    <p className="mt-1">
-                      {nation.leader.title} {nation.leader.name}
-                    </p>
+                      <div className="flex items-center justify-between gap-3">
+                        <dt className="text-white/40">Status</dt>
+                        <dd className={nation.crisis ? "font-semibold text-rose-300" : "text-emerald-300/80"}>
+                          {nation.crisis ? cap(nation.crisis) : "Stable"}
+                        </dd>
+                      </div>
+                    </dl>
                     {nation.relations.length > 0 && (
-                      <div className="mt-1.5 flex flex-wrap gap-1">
+                      <div className="mt-2 border-t border-white/[0.07] pt-2">
+                        <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-white/40">
+                          Relations
+                        </p>
+                        <div className="space-y-1.5">
                         {nation.relations.map((relation) => (
-                          <span
+                          <div
                             key={relation.id}
-                            className={`rounded-md px-1.5 py-0.5 ${
-                              RELATION_STYLE[relation.relation].cls
-                            }`}
-                            title={`${RELATION_STYLE[relation.relation].label}, tension ${relation.tension}`}
+                            className="flex items-center justify-between gap-2"
                           >
-                            {RELATION_STYLE[relation.relation].icon}{" "}
-                            {cap(nations[relation.id].name)}
-                          </span>
+                            <span className="min-w-0 truncate">
+                              <span className="inline-flex w-5 shrink-0 justify-center" aria-hidden="true">
+                                {RELATION_STYLE[relation.relation].icon}
+                              </span>
+                              {cap(nations[relation.id].name)}
+                            </span>
+                            <span className={`shrink-0 text-[11px] ${RELATION_STYLE[relation.relation].cls}`}>
+                              {RELATION_STYLE[relation.relation].label} · Tension: {relation.tension}
+                            </span>
+                          </div>
                         ))}
+                        </div>
                       </div>
                     )}
                   </div>

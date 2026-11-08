@@ -578,7 +578,7 @@ export default function Game({
       </div>
 
       {/* The planet and its nations */}
-      <aside className="glass subtle-scrollbar absolute bottom-4 left-4 top-4 flex w-64 flex-col gap-4 overflow-y-auto p-4">
+      <aside className="glass subtle-scrollbar stable-scrollbar absolute bottom-4 left-4 top-4 flex w-64 flex-col gap-4 overflow-y-auto p-4">
         <PlanetSummary
           hud={hud}
           sim={sim}
@@ -682,7 +682,6 @@ export default function Game({
         onOpenGalaxy={setGalaxy}
         chronicle={chronicle}
         busy={busy}
-        nationColors={sim.nations}
         onOpenChronicle={() => setChronicleOpen(true)}
       />
       {chronicleOpen && (
