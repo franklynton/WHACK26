@@ -364,7 +364,9 @@ export class PlanetSim {
     for (let f = 0; f < this.n; f++) {
       this.elevation[f] = raw[f] >= sea ? (raw[f] - sea) / (top - sea) : -(sea - raw[f]) / (sea - bottom);
       this.forest[f] = this.elevation[f] > 0.05 && this.elevation[f] < this.type.rockLine && this.moisture[f] > 0.55 ? 1 : 0;
-      this.classify(f);
+    }
+    for (let f = 0; f < this.n; f++) {
+      this.classify(f); // after every elevation is set, since beaches look at their neighbours
       this.food[f] = REGROW[this.terrain[f] as T] > 0.03 ? 0.8 : 0.1;
     }
     // Deposits come in clusters (noise peaks): metal and gold in hills and mountains, herbs in forests.
@@ -419,11 +421,21 @@ export class PlanetSim {
     else if (e < 0) t = T.Shallow;
     else if (e > 0.7 || (lat > 0.9 && e > 0.02)) t = T.Snow;
     else if (e > this.type.rockLine) t = T.Rock;
-    else if (e < 0.04) t = T.Sand;
+    else if (e < 0.04 && this.nearWater(f)) t = T.Sand; // beaches only; low land inland stays grass or desert
     else if (this.moisture[f] < 0.32) t = T.Desert;
     else if (this.forest[f]) t = T.Forest;
     else t = T.Grass;
     this.terrain[f] = t;
+  }
+
+  // Is there sea or a lake within two tiles? (By elevation, so it doesn't depend on classify order.)
+  private nearWater(f: number) {
+    for (let k = 0; k < 3; k++) {
+      const a = this.neighbours[f * 3 + k];
+      if (this.elevation[a] < 0) return true;
+      for (let j = 0; j < 3; j++) if (this.elevation[this.neighbours[a * 3 + j]] < 0) return true;
+    }
+    return false;
   }
 
   // Tiles within `radius` radians of `centre`, with a 0..1 falloff (1 at the centre).
