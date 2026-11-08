@@ -19,7 +19,18 @@ interface Body {
 
 // Returns the updated civ and a new chronicle entry. Never fails: falls back to canned text.
 export async function POST(req: Request) {
-  const { world, kind, detail = "" } = (await req.json()) as Body;
+  let body: Body;
+  try {
+    body = (await req.json()) as Body;
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  if (!body?.world || typeof body.world !== "object" || !body.kind) {
+    return NextResponse.json({ error: "World and kind are required" }, { status: 400 });
+  }
+
+  const { world, kind, detail = "" } = body;
   const ai = allowAi(visitorId(req));
 
   if (kind === "genesis" || !world.civ) {

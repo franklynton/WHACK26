@@ -5,6 +5,8 @@ import type { PlanetSim } from "@/sim/planet";
 import type { Resources } from "@/types/world";
 import { IncomingOffers, OffersTab, useTradeOffers } from "./TradeOffers";
 import { CODE_RULE, GALAXY_MAX, cleanCode, joinError, setWantedGalaxy, typeCode, wantedGalaxy } from "@/lib/galaxyCode";
+import { GalaxyMarket } from "./GalaxyMarket";
+import { GalaxyInvasion } from "./GalaxyInvasion";
 
 // Multiplayer: every planet syncs a snapshot to Supabase (through /api/galaxy) every few seconds.
 // Galaxies are temporary rooms of up to 5 gods, named by a code: the first god to use a code creates it,
@@ -31,84 +33,6 @@ interface Action {
   message: string;
 }
 
-interface MarketOrder {
-  id: number;
-  world_id: string;
-  side: "buy" | "sell";
-  resource: keyof Resources;
-  price: number;
-  quantity: number;
-  remaining: number;
-  status: string;
-  created_at: string;
-}
-
-interface MarketTrade {
-  id: number;
-  resource: keyof Resources;
-  price: number;
-  quantity: number;
-  buyer_world_id: string;
-  seller_world_id: string;
-  created_at: string;
-}
-
-interface MarketPrice {
-  resource: keyof Resources;
-  base_price: number;
-  current_price: number;
-}
-
-interface MarketPricePoint {
-  resource: keyof Resources;
-  price: number;
-  created_at: string;
-}
-
-const RESOURCES = ["food", "wood", "stone", "metal", "gold", "herbs"] as const;
-
-const RESOURCE_STYLE: Record<keyof Resources, { label: string; button: string; active: string; chart: string; text: string }> = {
-  food: { label: "Food", button: "border-lime-300/20 bg-lime-400/10 text-lime-100", active: "bg-lime-400/25 ring-lime-300/50", chart: "#a3e635", text: "text-lime-200" },
-  wood: { label: "Wood", button: "border-amber-300/20 bg-amber-400/10 text-amber-100", active: "bg-amber-400/25 ring-amber-300/50", chart: "#fbbf24", text: "text-amber-200" },
-  stone: { label: "Stone", button: "border-slate-300/20 bg-slate-300/10 text-slate-100", active: "bg-slate-300/25 ring-slate-300/50", chart: "#cbd5e1", text: "text-slate-200" },
-  metal: { label: "Metal", button: "border-cyan-300/20 bg-cyan-400/10 text-cyan-100", active: "bg-cyan-400/25 ring-cyan-300/50", chart: "#22d3ee", text: "text-cyan-200" },
-  gold: { label: "Gold", button: "border-yellow-300/20 bg-yellow-400/10 text-yellow-100", active: "bg-yellow-400/25 ring-yellow-300/50", chart: "#facc15", text: "text-yellow-200" },
-  herbs: { label: "Herbs", button: "border-fuchsia-300/20 bg-fuchsia-400/10 text-fuchsia-100", active: "bg-fuchsia-400/25 ring-fuchsia-300/50", chart: "#e879f9", text: "text-fuchsia-200" },
-};
-
-function MarketChart({ base, points, resource }: { base: number; points: MarketPricePoint[]; resource: keyof Resources }) {
-  const values = points.length ? points.map((point) => Number(point.price)) : [base];
-  const min = Math.max(0, Math.min(base, ...values) - 1);
-  const max = Math.max(base, ...values) + 1;
-  const range = Math.max(1, max - min);
-  const coordinates = values.map((value, index) => {
-    const x = values.length === 1 ? 160 : 4 + (index / (values.length - 1)) * 312;
-    const y = 92 - ((value - min) / range) * 84;
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  });
-  const current = values[values.length - 1];
-  const previous = values.length > 1 ? values[values.length - 2] : base;
-  const changePercent = base > 0 ? ((current - previous) / previous) * 100 : 0;
-  const style = RESOURCE_STYLE[resource] ?? RESOURCE_STYLE.gold;
-
-  return (
-    <div className="mt-2 rounded-lg border border-white/[0.07] bg-black/10 px-3 py-2">
-      <div className="mb-1 flex items-center justify-between text-xs">
-        <span className="text-white/55">Price history</span>
-        <span className={`font-semibold ${style.text}`}>
-          {current.toLocaleString()} credits
-          <span className="ml-2 text-[10px]">
-            {changePercent >= 0 ? "+" : ""}{changePercent.toFixed(1)}%
-          </span>
-        </span>
-      </div>
-      <svg viewBox="0 0 320 96" className="h-16 w-full" role="img" aria-label={`Current price ${current} credits`}>
-        {[0, 46, 92].map((y) => <line key={y} x1="4" x2="316" y1={y} y2={y} className="stroke-white/10" strokeWidth="1" />)}
-        <polyline points={coordinates.join(" ")} fill="none" stroke={style.chart} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-      </svg>
-    </div>
-  );
-}
 
 // A random id kept in this browser, so a player keeps one planet row (and the secret token that owns it).
 function stored(key: string) {
@@ -154,28 +78,14 @@ export default function Galaxy({
   const [aloneLocal, setAloneLocal] = useState(false); // before migration 003 there are no rooms, so "Play alone" is kept here
   const [error, setError] = useState(""); // a join that failed, shown under the code box like a form error
   const [message, setMessage] = useState("");
-  const [marketOrders, setMarketOrders] = useState<MarketOrder[]>([]);
-  const [marketTrades, setMarketTrades] = useState<MarketTrade[]>([]);
-  const [marketSide, setMarketSide] = useState<"buy" | "sell">("buy");
-  const [marketResource, setMarketResource] = useState<keyof Resources>("gold");
-  const [marketPrice, setMarketPrice] = useState(10);
-  const [marketQuantity, setMarketQuantity] = useState(10);
-  const [credits, setCredits] = useState(1000);
   const [tab, setTab] = useState<"invade" | "market" | "offers">("invade");
   const marketOpen = tab === "market";
-  const [marketOrderPanel, setMarketOrderPanel] = useState<"buy" | "sell" | null>(null);
-  const [marketPrices, setMarketPrices] = useState<MarketPrice[]>([]);
-  const [marketHistory, setMarketHistory] = useState<MarketPricePoint[]>([]);
-  const [simulatedHistory, setSimulatedHistory] = useState<MarketPricePoint[]>([]);
 
   useEffect(() => {
     if (!open) return;
     if (view === "market" || view === "invade" || view === "offers") setTab(view);
   }, [open, view]);
 
-  useEffect(() => {
-    if (!open) setMarketOrderPanel(null);
-  }, [open]);
 
   // This planet's id and the secret token that owns its row. The demo is a separate planet, so it gets its own.
   const [ids] = useState(() => ({ world: stored(`arda-world-id${demo ? "-demo" : ""}`), token: stored(`arda-owner-token${demo ? "-demo" : ""}`) }));
@@ -241,27 +151,6 @@ export default function Galaxy({
     [sim, post],
   );
 
-  const loadMarket = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/galaxy?market=1&worldId=${encodeURIComponent(ids.world)}`);
-      const data = await res.json();
-      if (!res.ok) return;
-      setMarketOrders((data.orders ?? []) as MarketOrder[]);
-      setMarketTrades((data.trades ?? []) as MarketTrade[]);
-      setMarketPrices((data.prices ?? []) as MarketPrice[]);
-      // Credits live only in the database. Resources reach the game through the sync (migration 008),
-      // so the market never overwrites what the planet has produced since.
-      const me = data.me as { credits?: number } | null;
-      const history = (data.history ?? []) as MarketPricePoint[];
-      setMarketHistory(history);
-      setSimulatedHistory((current) => current.length === 0 ? history : current);
-      if (me?.credits != null) {
-        setCredits(Number(me.credits));
-        sim.marketCredits = Math.max(0, Math.floor(Number(me.credits)));
-      }
-    } catch {}
-  }, [ids, sim]);
-
   const load = useCallback(async () => {
     try {
       const q = `worldId=${encodeURIComponent(ids.world)}${since.current != null ? `&since=${since.current}` : ""}`;
@@ -313,7 +202,6 @@ export default function Galaxy({
         deltas.current = data.deltas !== false;
         if (res.ok && deltas.current && data.planet?.resources) {
           sim.galaxyAdopt(data.planet.resources, snap.sent, data.planet.credits);
-          if (data.planet.credits != null) setCredits(Number(data.planet.credits));
         }
         await load();
         return res.ok;
@@ -341,13 +229,6 @@ export default function Galaxy({
   }, [sync]);
 
   useEffect(() => {
-    if (!marketOpen || !galaxy) return;
-    void loadMarket();
-    const timer = window.setInterval(() => void loadMarket(), 5000);
-    return () => window.clearInterval(timer);
-  }, [marketOpen, galaxy, loadMarket]);
-
-  useEffect(() => {
     if (!open) setTab("invade");
   }, [open]);
 
@@ -370,30 +251,6 @@ export default function Galaxy({
     } catch {}
     setSwitching(false);
     setMessage(`You left galaxy ${was} and are playing alone. Your planet keeps everything it traded, won or lost.`);
-  };
-
-  const placeMarketOrder = async () => {
-    if (!galaxy) return setMessage("Join a galaxy before placing an order.");
-    await sync(); // so the database knows what we hold right now
-    const { data } = await post({
-      action: "place_order",
-      side: marketSide,
-      resource: marketResource,
-      price: marketPrice,
-      quantity: marketQuantity,
-    });
-    setMessage(data.error || `Order ${data.status ?? "placed"}${data.remaining != null ? ` (${data.remaining} remaining)` : ""}`);
-    await sync(); // brings the held goods and any fill into the game
-    if (!data.error) setMarketOrderPanel(null);
-    await sync(); // brings the held goods and any fill into the game
-    await loadMarket();
-  };
-
-  const cancelMarketOrder = async (orderId: number) => {
-    const { data } = await post({ action: "cancel_order", orderId });
-    setMessage(data.error || "Order cancelled.");
-    await sync(); // the refund
-    await loadMarket();
   };
 
   const createRandomGalaxy = async () => {
@@ -586,138 +443,7 @@ export default function Galaxy({
         {enabled && rooms && galaxy && tab === "offers" && <OffersTab planets={shown} sim={sim} spacefaring={spacefaring} offers={offers} />}
 
         {enabled && rooms && galaxy && marketOpen && (
-          <div>
-            <div className="mb-3 flex items-center justify-between">
-              <div className="flex gap-1">
-                {RESOURCES.map((item) => (
-                  <button
-                    key={item}
-                    onClick={() => setMarketResource(item)}
-                    className={`rounded-full border px-2.5 py-1 text-xs capitalize transition ${RESOURCE_STYLE[item].button} ${marketResource === item ? `${RESOURCE_STYLE[item].active} ring-1` : "opacity-50 hover:opacity-100"}`}
-                  >
-                    {item}
-                  </button>
-                ))}
-              </div>
-              <span className="text-xs font-semibold text-amber-200">{credits.toLocaleString()} credits</span>
-            </div>
-            <MarketChart
-              base={marketPrices.find((price) => price.resource === marketResource)?.base_price ?? 10}
-              points={marketHistory.filter((point) => point.resource === marketResource)}
-              resource={marketResource}
-            />
-            <div className="mt-3 grid grid-cols-[1fr_1fr_auto] items-center gap-2">
-              <div className="rounded-lg border border-emerald-300/10 bg-emerald-400/[0.07] px-3 py-2">
-                <p className="text-[10px] uppercase tracking-[0.08em] text-emerald-200/60">Best bid</p>
-                <p className="mt-0.5 text-sm font-semibold text-emerald-100">
-                  {Math.max(0, ...marketOrders.filter((o) => o.side === "buy" && o.resource === marketResource).map((o) => o.price)) || "--"} <span className="text-[11px] font-normal text-white/40">credits</span>
-                </p>
-              </div>
-              <div className="rounded-lg border border-rose-300/10 bg-rose-400/[0.07] px-3 py-2">
-                <p className="text-[10px] uppercase tracking-[0.08em] text-rose-200/60">Best ask</p>
-                <p className="mt-0.5 text-sm font-semibold text-rose-100">
-                  {marketOrders.filter((o) => o.side === "sell" && o.resource === marketResource).length ? Math.min(...marketOrders.filter((o) => o.side === "sell" && o.resource === marketResource).map((o) => o.price)) : "--"} <span className="text-[11px] font-normal text-white/40">credits</span>
-                </p>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => {
-                    setMarketSide("buy");
-                    setMarketOrderPanel("buy");
-                  }}
-                  className="min-w-20 rounded-lg border border-emerald-300/20 bg-emerald-400/15 px-4 py-2 text-sm font-semibold text-emerald-100 hover:bg-emerald-400/25"
-                >
-                  Buy
-                </button>
-                <button
-                  onClick={() => {
-                    setMarketSide("sell");
-                    setMarketOrderPanel("sell");
-                  }}
-                  className="min-w-20 rounded-lg border border-rose-300/20 bg-rose-400/15 px-4 py-2 text-sm font-semibold text-rose-100 hover:bg-rose-400/25"
-                >
-                  Sell
-                </button>
-              </div>
-            </div>
-            {marketTrades.length > 0 && (
-              <div className="mt-2 flex items-center justify-between border-t border-white/[0.07] pt-2 text-xs text-white/45">
-                <span>Last trade</span>
-                <span>{marketTrades[0].quantity} {marketTrades[0].resource} at <strong className="text-white/70">{marketTrades[0].price} credits</strong></span>
-              </div>
-            )}
-
-            {marketOrderPanel && (
-              <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/55 backdrop-blur-sm" onClick={() => setMarketOrderPanel(null)}>
-                <div
-                  className="w-[28rem] rounded-2xl border border-white/10 bg-[#111425]/95 p-4 shadow-2xl"
-                  onClick={(e) => e.stopPropagation()}
-                  role="dialog"
-                  aria-modal="true"
-                  aria-label={`${marketOrderPanel} ${marketResource} order`}
-                >
-                  <div className="mb-4 flex items-center justify-between">
-                    <div>
-                      <p className="text-base font-semibold capitalize">{marketOrderPanel} {marketResource}</p>
-                      <p className="mt-0.5 text-xs text-white/45">{credits.toLocaleString()} credits available</p>
-                    </div>
-                    <button onClick={() => setMarketOrderPanel(null)} className="rounded-lg px-2 py-1 text-white/45 hover:bg-white/5 hover:text-white" aria-label="Close order form">✕</button>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <label className="text-xs text-white/55">Credits / unit
-                      <input
-                        type="number"
-                        min={1}
-                        max={1000000000}
-                        value={marketPrice}
-                        onChange={(e) => setMarketPrice(Math.max(1, Number(e.target.value) || 1))}
-                        className="mt-1 w-full rounded-lg border border-white/[0.08] bg-white/[0.07] px-3 py-2 text-sm text-white outline-none focus:border-white/20"
-                      />
-                    </label>
-                    <label className="text-xs text-white/55">Quantity
-                      <input
-                        type="number"
-                        min={1}
-                        max={100000}
-                        value={marketQuantity}
-                        onChange={(e) => setMarketQuantity(Math.max(1, Number(e.target.value) || 1))}
-                        className="mt-1 w-full rounded-lg border border-white/[0.08] bg-white/[0.07] px-3 py-2 text-sm text-white outline-none focus:border-white/20"
-                      />
-                    </label>
-                  </div>
-
-                  <button
-                    onClick={placeMarketOrder}
-                    className={`mt-3 w-full rounded-lg px-3 py-2 text-sm font-semibold ${marketOrderPanel === "buy" ? "bg-emerald-400/20 text-emerald-100 hover:bg-emerald-400/30" : "bg-rose-400/20 text-rose-100 hover:bg-rose-400/30"}`}
-                  >
-                    Place {marketOrderPanel} order
-                  </button>
-
-                  <div className="mt-4 grid grid-cols-2 gap-3 border-t border-white/[0.07] pt-3 text-xs">
-                    <div>
-                      <p className="mb-1 font-semibold text-emerald-200">Bids</p>
-                      {marketOrders.filter((o) => o.side === "buy" && o.resource === marketResource).sort((a, b) => b.price - a.price || a.created_at.localeCompare(b.created_at)).slice(0, 6).map((o) => (
-                        <div key={o.id} className="flex justify-between border-t border-white/[0.05] py-1.5">
-                          <span>{o.remaining} × {o.price}</span>
-                          {o.world_id === ids.world ? <button onClick={() => cancelMarketOrder(o.id)} className="text-rose-300 hover:text-rose-200">Cancel</button> : <span className="text-white/30">bid</span>}
-                        </div>
-                      ))}
-                    </div>
-                    <div>
-                      <p className="mb-1 font-semibold text-rose-200">Asks</p>
-                      {marketOrders.filter((o) => o.side === "sell" && o.resource === marketResource).sort((a, b) => a.price - b.price || a.created_at.localeCompare(b.created_at)).slice(0, 6).map((o) => (
-                        <div key={o.id} className="flex justify-between border-t border-white/[0.05] py-1.5">
-                          <span>{o.remaining} × {o.price}</span>
-                          {o.world_id === ids.world ? <button onClick={() => cancelMarketOrder(o.id)} className="text-rose-300 hover:text-rose-200">Cancel</button> : <span className="text-white/30">ask</span>}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
+          <GalaxyMarket sim={sim} worldId={ids.world} galaxy={galaxy} post={post} sync={sync} onMessage={setMessage} />
         )}
 
         {/* Before migration 003 there are no rooms: everyone online is listed, so "Play alone" hides them here */}
@@ -730,36 +456,15 @@ export default function Galaxy({
           </div>
         )}
 
-        {tab === "invade" && enabled && !alone && planets.length === 0 && (
-          <p className="text-sm text-white/50">You&apos;re the only god here{galaxy ? `. Share the code ${galaxy} so others can join` : ""}.</p>
-        )}
-        {tab === "invade" && enabled && !spacefaring && shown.length > 0 && <p className="mb-2 text-xs text-white/45">Invading unlocks when your people reach the Space Age.</p>}
-        {tab === "invade" && enabled && shown.length > 0 && (
-          <>
-            <div className="space-y-2">
-              {shown.map((p) => (
-                <article key={p.world_id} className="rounded-lg bg-white/5 p-3">
-                  <div className="flex justify-between gap-2">
-                    <div>
-                      <p className="font-semibold">{p.planet_name}</p>
-                      <p className="text-xs text-white/50">
-                        {p.planet_type} · god: {p.owner_name}
-                      </p>
-                    </div>
-                    <span className="text-xs text-white/50">⚔ {p.military}</span>
-                  </div>
-                  <p className="mt-1 text-xs text-white/60">
-                    {p.population} people · {p.output}/yr
-                  </p>
-                  <div className="mt-2 flex gap-2">
-                    <button disabled={!spacefaring} onClick={() => invade(p.world_id)} className="flex-1 rounded bg-rose-400/15 px-2 py-1.5 text-xs text-rose-200 hover:bg-rose-400/25 disabled:opacity-40">
-                      Invade
-                    </button>
-                  </div>
-                </article>
-              ))}
-            </div>
-          </>
+        {tab === "invade" && (
+          <GalaxyInvasion
+            enabled={enabled}
+            alone={alone}
+            galaxy={galaxy}
+            planets={shown}
+            spacefaring={spacefaring}
+            onInvade={invade}
+          />
         )}
       </div>
     </div>
