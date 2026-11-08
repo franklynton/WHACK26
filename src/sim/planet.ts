@@ -1112,8 +1112,10 @@ export class PlanetSim {
   demo = false; // no win/lose screen, so nothing interrupts a pitch
   startDemo() {
     this.demo = true;
-    this.pace = 4;
-    this.techBoost = 2;
+    // 2x clock (was 4x: too hectic to follow), with eras climbing twice as fast again, so the
+    // Space Age still arrives as quickly as before while disasters and news come half as often.
+    this.pace = 2;
+    this.techBoost = 4;
   }
 
   // Demo shortcut: put your nation on the edge of the Space Age, so the next tick launches it (and unlocks the galaxy).
