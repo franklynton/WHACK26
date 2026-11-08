@@ -140,6 +140,8 @@ export default function Game({
       return false;
     }
   });
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsRef = useRef<HTMLDivElement>(null);
   // Sound starts with the game (the click that created the planet allows it), or else on the next click.
   useEffect(() => {
     sound.setMuted(muted);
@@ -157,6 +159,21 @@ export default function Game({
       window.removeEventListener("keydown", go);
     };
   }, []);
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (!settingsRef.current?.contains(event.target as Node)) setSettingsOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSettingsOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [settingsOpen]);
   const [hud, setHud] = useState<Hud>(() => readHud(sim));
   const [miracle, setMiracle] = useState<MiracleId | null>(null); // picked from the bar; click the land to cast
   const [seenOutcome, setSeenOutcome] = useState(false);
@@ -208,6 +225,7 @@ export default function Game({
     () => ui?.chronicle ?? [],
   );
   const [sel, setSel] = useState(() => ui?.sel ?? 0); // the nation the god is looking at and talking to
+  const [expandedNation, setExpandedNation] = useState<number | null>(null);
   const [busy, setBusy] = useState<"" | "narrating" | "thinking">("");
   const [focus, setFocus] = useState<{ face: number; key: number } | null>(
     null,
@@ -721,15 +739,19 @@ export default function Game({
               .filter((n) => n.alive)
               .map((n) => (
                 <li key={n.id}>
-                  <button
-                    onClick={() => {
-                      setSel(n.id);
-                      const face = sim.nationHome(n.id);
-                      if (face != null) setFocus({ face, key: Date.now() });
-                    }}
-                    className={`w-full rounded-lg px-2 py-1.5 text-left text-sm transition ${sel === n.id ? "bg-white/15" : "hover:bg-white/5"} ${n.alive ? "" : "opacity-40"}`}
+                  <div
+                    className={`overflow-hidden rounded-lg transition ${sel === n.id ? "bg-white/15" : "hover:bg-white/5"}`}
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center">
+                      <button
+                        onClick={() => {
+                          setSel(n.id);
+                          const face = sim.nationHome(n.id);
+                          if (face != null) setFocus({ face, key: Date.now() });
+                        }}
+                        className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left text-sm"
+                        title={`Focus ${cap(n.name)}`}
+                      >
                       <span
                         className="h-2.5 w-2.5 shrink-0 rounded-full"
                         style={{ background: n.color }}
@@ -738,66 +760,68 @@ export default function Game({
                       <span className="flex-1 truncate font-medium">
                         {cap(n.name)}
                       </span>
+                      <span className="hidden max-w-16 truncate text-xs text-amber-200/60 sm:block">
+                        {ERAS[n.era]}
+                      </span>
                       <span className="text-xs tabular-nums text-white/50">
                         {n.alive ? n.population : "fallen"}
                       </span>
-                    </div>
-                    <div className="ml-4.5 flex flex-wrap gap-x-2 text-xs">
-                      {n.alive && (
-                        <span className="text-amber-200/70">{ERAS[n.era]}</span>
-                      )}
-                      {!!n.ships && (
+                      </button>
+                      <button
+                        onClick={() =>
+                          setExpandedNation((current) =>
+                            current === n.id ? null : n.id,
+                          )
+                        }
+                        className="mr-1 grid h-7 w-7 shrink-0 place-items-center rounded-md text-xs text-white/45 transition hover:bg-white/10 hover:text-white/80"
+                        aria-expanded={expandedNation === n.id}
+                        aria-label={`${expandedNation === n.id ? "Hide" : "Show"} details for ${cap(n.name)}`}
+                      >
                         <span
-                          className="text-sky-200/80"
-                          title={`Navy: ${n.ships} warship${n.ships === 1 ? "" : "s"}`}
+                          className={`transition-transform ${expandedNation === n.id ? "rotate-180" : ""}`}
                         >
-                          ⚓ {n.ships}
+                          ▾
                         </span>
-                      )}
-                      {n.crisis && (
-                        <span className="font-semibold uppercase text-rose-300">
-                          {n.crisis}
-                        </span>
-                      )}
-                      {n.relations
-                        .filter((r) => n.alive && r.relation !== "peace")
-                        .map((r) => (
-                          <span
-                            key={r.id}
-                            className={RELATION_STYLE[r.relation].cls}
-                            title={`${RELATION_STYLE[r.relation].label}, tension ${r.tension}`}
-                          >
-                            {RELATION_STYLE[r.relation].icon}{" "}
-                            {cap(hud.nations[r.id].name)}
-                          </span>
-                        ))}
+                      </button>
                     </div>
-                  </button>
+                    {expandedNation === n.id && (
+                      <div className="mx-2 mb-2 border-t border-white/10 px-1 pt-2 text-xs text-white/60">
+                        <div className="flex flex-wrap gap-x-3 gap-y-1">
+                          <span>{n.villages} {n.villages === 1 ? "village" : "villages"}</span>
+                          <span>{POLICY_LABEL[n.policy]}</span>
+                          {!!n.ships && <span>⚓ {n.ships} ships</span>}
+                          {n.crisis && (
+                            <span className="font-semibold uppercase text-rose-300">
+                              {n.crisis}
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-1">
+                          {n.leader.title} {n.leader.name}
+                        </p>
+                        {n.relations.length > 0 && (
+                          <div className="mt-1.5 flex flex-wrap gap-1">
+                            {n.relations.map((r) => (
+                              <span
+                                key={r.id}
+                                className={`rounded-md px-1.5 py-0.5 ${RELATION_STYLE[r.relation].cls}`}
+                                title={`${RELATION_STYLE[r.relation].label}, tension ${r.tension}`}
+                              >
+                                {RELATION_STYLE[r.relation].icon}{" "}
+                                {cap(hud.nations[r.id].name)}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </li>
               ))}
           </ul>
         </div>
-        <div className="mt-auto flex flex-wrap items-end justify-center gap-2 whitespace-nowrap">
-          {onNewPlanet && (
-            <button
-              onClick={() =>
-                (demo ||
-                  confirm(
-                    "Start over on a new planet? This planet will be lost.",
-                  )) &&
-                onNewPlanet()
-              }
-              className="rounded-lg bg-white/5 px-2.5 py-1 text-xs text-white/60 transition hover:bg-white/10 hover:text-white"
-              title={
-                demo
-                  ? "Leave the demo and go back to your own planet"
-                  : "Your planet saves automatically in this browser"
-              }
-            >
-              {demo ? "Exit demo" : "New planet"}
-            </button>
-          )}
-          {demo && !hud.god.spacefaring && (
+        {demo && !hud.god.spacefaring && (
+          <div className="mt-auto flex justify-center">
             <button
               onClick={() => sim.skipToSpace()}
               className="rounded-lg bg-indigo-400/15 px-2.5 py-1 text-xs text-indigo-200 transition hover:bg-indigo-400/30"
@@ -805,51 +829,8 @@ export default function Game({
             >
               🚀 Go to space
             </button>
-          )}
-          <button
-            onClick={() => setGalaxy("join")}
-            className={`rounded-lg px-2.5 py-1 text-sm transition ${hud.god.spacefaring ? "bg-indigo-400/25 font-semibold hover:bg-indigo-400/40" : "bg-white/5 hover:bg-white/10"}`}
-            title={
-              hud.god.spacefaring
-                ? "Trade with or invade the planets in your galaxy"
-                : `Join or leave a galaxy. Trading and invading unlock at the Space Age (your nation is in the ${ERAS[hud.nations[0]?.era ?? 0]})`
-            }
-          >
-            🌌 Galaxy
-          </button>
-          {/* Connection pill: green with how full your galaxy is, "solo" when you're in none, grey when offline */}
-          <span
-            className={`flex shrink-0 items-center gap-1 self-center whitespace-nowrap rounded-full px-1.5 py-0.5 text-[11px] tabular-nums ${link.enabled && link.members ? "bg-emerald-400/15 text-emerald-200" : "bg-white/5 text-white/40"}`}
-            title={
-              !link.enabled
-                ? "Galaxy offline"
-                : link.galaxy
-                  ? `In galaxy ${link.galaxy}: ${link.members}/5 gods`
-                  : link.members
-                    ? `${link.members} gods online`
-                    : "Not in a galaxy"
-            }
-          >
-            <span
-              className={`h-1.5 w-1.5 rounded-full ${link.enabled ? (link.members ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]" : "bg-white/50") : "bg-white/30"}`}
-            />
-            {!link.enabled
-              ? "off"
-              : link.galaxy
-                ? `${link.members}/5`
-                : link.members
-                  ? link.members
-                  : "solo"}
-          </span>
-          <button
-            onClick={() => setMuted((m) => !m)}
-            className="rounded-lg bg-white/5 px-2.5 py-1 text-sm transition hover:bg-white/10"
-            title={muted ? "Turn sound on" : "Mute"}
-            aria-label={muted ? "Turn sound on" : "Mute"}
-          >
-            {muted ? "🔇" : "🔊"}
-          </button>
-        </div>
+          </div>
+        )}
         {!awake && (
           <p className="text-xs text-white/55">
             Your nations are wandering. When each founds a village it will
@@ -1066,12 +1047,98 @@ export default function Game({
       {/* The chosen nation's mind */}
       <aside className="glass subtle-scrollbar absolute bottom-4 right-4 top-4 flex w-72 flex-col p-4">
         <div className="mb-3 space-y-2 border-b border-white/10 pb-3 text-sm">
-          <div className="flex items-center gap-2">
-            <span
-              className="h-3 w-3 rounded-full"
-              style={{ background: me.color }}
-            />
-            <p className="text-lg font-semibold">{cap(me.name)}</p>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <span
+                className="h-3 w-3 shrink-0 rounded-full"
+                style={{ background: me.color }}
+              />
+              <p className="truncate text-lg font-semibold">{cap(me.name)}</p>
+            </div>
+            <div ref={settingsRef} className="relative shrink-0">
+              <button
+                onClick={() => setSettingsOpen((open) => !open)}
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-sm text-white/65 transition hover:bg-white/10 hover:text-white"
+                title="Settings"
+                aria-label="Settings"
+                aria-expanded={settingsOpen}
+              >
+                ⚙️
+              </button>
+              {settingsOpen && (
+                <div className="absolute right-0 top-10 z-30 w-56 rounded-xl border border-white/10 bg-[#111827]/90 p-2 shadow-2xl backdrop-blur-xl">
+                  {onNewPlanet && (
+                    <button
+                      onClick={() => {
+                        setSettingsOpen(false);
+                        if (
+                          demo ||
+                          confirm("Start over on a new planet? This planet will be lost.")
+                        ) {
+                          onNewPlanet();
+                        }
+                      }}
+                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-white/70 transition hover:bg-white/10 hover:text-white"
+                    >
+                      <span>🪐</span>
+                      <span>{demo ? "Exit demo" : "New planet"}</span>
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      setSettingsOpen(false);
+                      setGalaxy("join");
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-white/70 transition hover:bg-white/10 hover:text-white"
+                  >
+                    <span>🌌</span>
+                    <span>Galaxy</span>
+                  </button>
+                  <div className="mx-2 my-1 h-px bg-white/10" />
+                  <button
+                    onClick={() => setMuted((value) => !value)}
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-white/70 transition hover:bg-white/10 hover:text-white"
+                    aria-label={muted ? "Turn sound on" : "Mute"}
+                  >
+                    <span>{muted ? "🔇" : "🔊"}</span>
+                    <span>{muted ? "Sound off" : "Mute"}</span>
+                  </button>
+                  <div
+                    className={`mx-2 mt-1 flex items-center gap-2 rounded-lg px-1 py-2 text-xs ${
+                      link.enabled && link.members ? "text-emerald-200" : "text-white/45"
+                    }`}
+                    title={
+                      !link.enabled
+                        ? "Galaxy offline"
+                        : link.galaxy
+                          ? `In galaxy ${link.galaxy}: ${link.members}/5 gods`
+                          : link.members
+                            ? `${link.members} gods online`
+                            : "Not in a galaxy"
+                    }
+                  >
+                    <span
+                      className={`ml-0.5 h-2 w-2 rounded-full ${
+                        link.enabled && link.members
+                          ? "bg-emerald-400"
+                          : link.enabled
+                            ? "bg-white/50"
+                            : "bg-white/30"
+                      }`}
+                    />
+                    <span>
+                      {!link.enabled
+                        ? "Offline"
+                        : link.galaxy
+                          ? `${link.members}/5 gods online`
+                          : link.members
+                            ? `${link.members} gods online`
+                            : "Solo"}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
           <button
             onClick={() => openLeader(sel)}
