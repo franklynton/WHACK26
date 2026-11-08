@@ -217,15 +217,27 @@ export function SettingsPopover({
     <div ref={panelRef} className="relative shrink-0">
       <button
         onClick={onToggle}
-        className="flex h-11 w-11 items-center justify-center rounded-lg text-2xl text-white/65 transition hover:bg-white/10 hover:text-white"
+        className="flex h-11 w-11 items-center justify-center rounded-2xl text-2xl text-white/65 transition hover:bg-white/10 hover:text-white"
         title="Settings"
         aria-label="Settings"
         aria-expanded={open}
       >
-        ⚙️
+        <svg
+          aria-hidden="true"
+          className="h-5 w-5 text-slate-400"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2a2 2 0 1 1-4 0V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3.5a2 2 0 1 1 0-4h.2a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.6V3a2 2 0 1 1 4 0v.2a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2a2 2 0 1 1 0 4H21a1.7 1.7 0 0 0-1.6 1Z" />
+        </svg>
       </button>
       {open && (
-        <div className="absolute right-0 top-12 z-30 w-56 rounded-xl border border-white/10 bg-[#111827]/90 p-2 shadow-2xl backdrop-blur-xl">
+        <div className="absolute right-0 top-14 z-30 w-56 rounded-xl border border-white/10 bg-[#111827]/90 p-2 shadow-2xl backdrop-blur-xl">
           {onNewPlanet && (
             <button
               onClick={() => {
@@ -311,7 +323,7 @@ export function UpgradeMenu({
   };
   return (
     <section
-      className="glass absolute left-[17.5rem] top-[14.5rem] z-50 w-96 !bg-[#0f1223]/95 max-w-[calc(100vw-20rem)] p-4 shadow-2xl"
+      className="glass absolute left-0 top-full z-50 mt-2 w-96 max-w-[calc(100vw-20rem)] !bg-[#0f1223]/95 p-4 shadow-2xl"
       aria-label="World upgrades"
     >
       <div className="mb-3 flex items-start justify-between border-b border-white/10 pb-3">

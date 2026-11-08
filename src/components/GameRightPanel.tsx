@@ -96,8 +96,22 @@ export function GameRightPanel({
 }) {
   return (
     <aside className="glass subtle-scrollbar absolute bottom-4 right-4 top-4 flex w-72 flex-col p-4">
+      <div className="absolute right-full top-0 z-30 mr-4 rounded-2xl border border-white/10 bg-[#111827]/75 shadow-lg backdrop-blur-md">
+        <SettingsPopover
+          open={settingsOpen}
+          onToggle={onSettingsToggle}
+          panelRef={settingsRef}
+          onClose={onSettingsClose}
+          demo={demo}
+          onNewPlanet={onNewPlanet}
+          onGalaxy={onGalaxy}
+          muted={muted}
+          onMute={onMute}
+          link={link}
+        />
+      </div>
       <div className="mb-3 space-y-2 border-b border-white/10 pb-3 text-sm">
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
           <div className="flex min-w-0 items-center gap-2">
             <span
               className="h-3 w-3 shrink-0 rounded-full"
@@ -105,18 +119,6 @@ export function GameRightPanel({
             />
             <p className="truncate text-lg font-semibold">{cap(nation.name)}</p>
           </div>
-          <SettingsPopover
-            open={settingsOpen}
-            onToggle={onSettingsToggle}
-            panelRef={settingsRef}
-            onClose={onSettingsClose}
-            demo={demo}
-            onNewPlanet={onNewPlanet}
-            onGalaxy={onGalaxy}
-            muted={muted}
-            onMute={onMute}
-            link={link}
-          />
         </div>
         <div
           className={`flex w-full items-center gap-3 rounded-xl bg-white/5 p-2 text-left ${nation.alive ? "" : "opacity-40"}`}
@@ -231,7 +233,10 @@ export function GameRightPanel({
                 }
               >
                 {icon && (
-                  <span className="block text-sm text-white/40" aria-hidden="true">
+                  <span
+                    className="block text-sm text-white/40"
+                    aria-hidden="true"
+                  >
                     {icon}
                   </span>
                 )}

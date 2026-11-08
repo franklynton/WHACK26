@@ -118,10 +118,16 @@ export default function Landing({ onStart }: { onStart: (playerName: string, pla
 
           {step === 1 && (
             <>
-              <p className="text-lg font-semibold">Choose your people</p>
+              <div>
+                <p className="text-lg font-semibold">Meet your peoples</p>
+                <p className="mt-1 text-xs leading-relaxed text-white/55">
+                  Your world begins with 3–5 nations. Pick the race of your
+                  starting nation; other races will settle alongside them.
+                </p>
+              </div>
               <div className="grid grid-cols-5 gap-1.5">
                 {RACES.map((r, i) => (
-                  <button type="button" key={r.id} onClick={() => setRace(r.id)} className={`flex flex-col items-center rounded-lg px-1 py-1 text-[10px] transition ${race === r.id ? "bg-sky-400/25 ring-1 ring-sky-300" : "bg-white/5 hover:bg-white/10"}`}>
+                  <button type="button" key={r.id} onClick={() => setRace(r.id)} aria-pressed={race === r.id} className={`flex flex-col items-center rounded-lg px-1 py-1 text-[10px] transition ${race === r.id ? "bg-sky-400/25 ring-1 ring-sky-300" : "bg-white/5 hover:bg-white/10"}`}>
                     <Portrait race={r.id} seed={i * 97 + 5} color="#5fd4ff" size={40} />
                     <span className="mt-0.5 font-medium">{r.name}</span>
                   </button>
@@ -130,7 +136,10 @@ export default function Landing({ onStart }: { onStart: (playerName: string, pla
               {RACES.filter((r) => r.id === race).map((r) => (
                 <div key={r.id} className="rounded-lg bg-white/5 px-3 py-2 text-xs">
                   <div className="mb-1 flex items-start justify-between gap-3">
-                    <p className="text-xs text-white/80">{r.blurb}</p>
+                    <p className="text-xs text-white/80">
+                      <span className="font-semibold text-sky-200/90">Starting nation: </span>
+                      {r.blurb}
+                    </p>
                     <span className="shrink-0 text-[10px] text-white/40">Home: {r.home}</span>
                   </div>
                   <RaceStats race={r.id} compact />
