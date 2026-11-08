@@ -2387,6 +2387,28 @@ export class PlanetSim {
     if (result === "won" && this.love[0] != null) this.love[0] = Math.min(100, this.love[0] + 5);
   }
 
+  // Half of all lost invasions shake the planet: our people turn on a neighbour they blame (war),
+  // or on their own ruler for failing to protect them (revolution, through the usual crisis path).
+  private invasionFallout(attacker: string) {
+    const nt = this.nations[0];
+    if (!nt?.alive) return;
+    const others = this.nations.filter((o) => o.alive && o.id !== 0 && this.relation[0][o.id] !== "war");
+    if (others.length && Math.random() < 0.5) {
+      const foe = others.sort((x, y) => this.tension[0][y.id] - this.tension[0][x.id])[0];
+      this.relation[0][foe.id] = this.relation[foe.id][0] = "war";
+      this.tension[0][foe.id] = this.tension[foe.id][0] = 85;
+      const text = `${cap(nt.name)} blame ${foe.name} for helping the raiders from ${attacker}. They have gone to war!`;
+      this.events.push({ kind: "diplomacy", detail: text, nation: 0, other: foe.id });
+      this.offer("war", "War!", text, this.capital(0)?.face ?? 0, [0, foe.id]);
+    } else {
+      nt.stability = Math.min(nt.stability, 15); // low enough for a revolution to break out
+      const text = `The people of ${nt.name} blame ${nt.leader.title} ${nt.leader.name} for the raid from ${attacker}. Revolt is spreading.`;
+      this.events.push({ kind: "revolution", detail: text, nation: 0 });
+      const home = this.nationHome(0);
+      if (home != null) this.announce("🔥", "Unrest after the raid", text, home, true);
+    }
+  }
+
   // The god spends devotion to shield the planet from an incoming fleet.
   raiseShields() {
     if (this.devotion < SHIELD_COST) return false;
@@ -2412,6 +2434,7 @@ export class PlanetSim {
       this.announce("🛸", "Invaded from space!", text, home);
       this.events.push({ kind: "disaster", detail: text, nation: 0 });
       if (this.love[0] != null && !shields) this.love[0] = Math.max(0, this.love[0] - 8); // "where was our god?"
+      if (Math.random() < 0.5) this.invasionFallout(attacker);
     } else {
       const text = `A fleet from ${attacker} attacked${shields ? ", but your shields held" : ""}. Your people drove it off${killed ? `, losing ${killed}` : ""}.`;
       this.announce("🛡️", "Invasion repelled", text, home);
