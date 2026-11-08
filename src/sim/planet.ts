@@ -2482,6 +2482,7 @@ export class PlanetSim {
 
   // ---- Invasions between planets (migration 011): soldiers really leave, fly for 30s, and come back ----
   spaceFleet = 0; // our soldiers away in space right now
+  lastBattle: { icon: string; title: string; text: string; won: boolean } | null = null; // for the war room
 
   // Soldiers our nation could send to space: its fighting-age people, at most the planet's military.
   soldiers() {
@@ -2532,6 +2533,7 @@ export class PlanetSim {
       : result === "tribute" ? ["💰", "Tribute paid", `${other} paid you not to land: ${got || "nothing much"}. The fleet came home whole.`]
       : result === "recalled" ? ["↩️", "Fleet recalled", `${other} left the galaxy before your fleet arrived. Everyone came home.`]
       : ["🛡️", "Repelled", `${other}'s defenders drove your fleet back. ${lost} soldiers fell.`];
+    this.lastBattle = { icon, title, text, won: result === "won" || result === "tribute" };
     this.announce(icon, title, text, home);
     this.events.push({ kind: result === "repelled" ? "disaster" : "milestone", detail: text, nation: 0 });
     if (result === "won" && this.love[0] != null) this.love[0] = Math.min(100, this.love[0] + 5);
