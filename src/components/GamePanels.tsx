@@ -183,7 +183,7 @@ export function SettingsPopover({
     <div ref={panelRef} className="relative shrink-0">
       <button
         onClick={onToggle}
-        className="flex h-8 w-8 items-center justify-center rounded-lg text-sm text-white/65 transition hover:bg-white/10 hover:text-white"
+        className="flex h-11 w-11 items-center justify-center rounded-lg text-2xl text-white/65 transition hover:bg-white/10 hover:text-white"
         title="Settings"
         aria-label="Settings"
         aria-expanded={open}
@@ -191,7 +191,7 @@ export function SettingsPopover({
         ⚙️
       </button>
       {open && (
-        <div className="absolute right-0 top-10 z-30 w-56 rounded-xl border border-white/10 bg-[#111827]/90 p-2 shadow-2xl backdrop-blur-xl">
+        <div className="absolute right-0 top-12 z-30 w-56 rounded-xl border border-white/10 bg-[#111827]/90 p-2 shadow-2xl backdrop-blur-xl">
           {onNewPlanet && (
             <button
               onClick={() => {
