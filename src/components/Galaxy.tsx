@@ -91,6 +91,7 @@ export default function Galaxy({
   useEffect(() => {
     if (!open) return;
     if (view === "market" || view === "invade" || view === "offers") setTab(view);
+    if (view === "join") setTab("invade"); // the join form shows on the Invade and Offers tabs
   }, [open, view]);
 
 
@@ -471,9 +472,10 @@ export default function Galaxy({
           </div>
         )}
 
-        {enabled && rooms && !galaxy && (
+        {/* Invading and offers need a galaxy; the market is shared by everyone, so it doesn't */}
+        {enabled && rooms && !galaxy && !marketOpen && (
           <div className="rounded-lg bg-white/[0.035] p-4">
-            <p className="mb-3 text-sm text-white/60">Join a galaxy to trade or invade other planets.</p>
+            <p className="mb-3 text-sm text-white/60">Join a galaxy to invade or send offers to other planets. The Market is open to everyone.</p>
             <div className="mb-3 grid grid-cols-3 gap-2">
               <button
                 onClick={() => {
@@ -503,7 +505,7 @@ export default function Galaxy({
           </div>
         )}
 
-        {enabled && rooms && galaxy && (
+        {enabled && rooms && (
           <div className="mb-4 grid grid-cols-3 gap-2">
             <button
               onClick={() => setTab("invade")}
@@ -528,9 +530,7 @@ export default function Galaxy({
 
         {enabled && rooms && galaxy && tab === "offers" && <OffersTab planets={shown} sim={sim} spacefaring={spacefaring} offers={offers} />}
 
-        {enabled && rooms && galaxy && marketOpen && (
-          <GalaxyMarket sim={sim} worldId={ids.world} galaxy={galaxy} post={post} sync={sync} onMessage={setMessage} />
-        )}
+        {enabled && marketOpen && <GalaxyMarket sim={sim} worldId={ids.world} galaxy={galaxy} post={post} sync={sync} />}
 
         {/* Before migration 003 there are no rooms: everyone online is listed, so "Play alone" hides them here */}
         {enabled && !rooms && (
@@ -541,7 +541,7 @@ export default function Galaxy({
           </div>
         )}
 
-        {tab === "invade" && (
+        {tab === "invade" && (galaxy || !rooms) && (
           <GalaxyInvasion
             enabled={enabled}
             alone={alone}
