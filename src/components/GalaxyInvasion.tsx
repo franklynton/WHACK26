@@ -1,6 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import { fleetSecondsLeft, type Fleet } from "./InvasionFleets";
+
+// How much of the army to send: more soldiers hit harder, but more can die and fewer stay home to defend.
+const SHARES = [
+  { share: 0.25, label: "25%" },
+  { share: 0.5, label: "50%" },
+  { share: 1, label: "All" },
+];
 
 export interface InvasionPlanet {
   world_id: string;
@@ -18,13 +26,19 @@ export function GalaxyInvasion({
   planets,
   spacefaring,
   onInvade,
+  military = 0,
+  outgoing = [],
 }: {
   enabled: boolean | null;
   alone: boolean;
   planets: InvasionPlanet[];
   spacefaring: boolean;
-  onInvade: (target: string) => Promise<string>;
+  onInvade: (target: string, share: number) => Promise<string>;
+  military?: number;
+  outgoing?: Fleet[];
 }) {
+  const [share, setShare] = useState(0.5);
+  const flying = outgoing.find((f) => fleetSecondsLeft(f) > 0);
   const [selected, setSelected] = useState<InvasionPlanet | null>(null);
   const [invasionResult, setInvasionResult] = useState<string | null>(null);
   const [launching, setLaunching] = useState(false);
@@ -34,7 +48,7 @@ export function GalaxyInvasion({
     setLaunching(true);
     setInvasionResult(null);
     try {
-      const result = await onInvade(selected.world_id);
+      const result = await onInvade(selected.world_id, share);
       window.setTimeout(() => {
         setInvasionResult(result);
         setLaunching(false);
@@ -115,7 +129,30 @@ export function GalaxyInvasion({
               </>
             )}
           </div>
-          <div className="flex items-center justify-between gap-4 border-t border-white/[0.06] px-4 py-3">
+          <div className="flex items-center justify-between gap-3 border-t border-white/[0.06] px-4 pt-3">
+            <span className="text-xs text-white/50">Send</span>
+            <div className="flex flex-1 gap-1" role="radiogroup" aria-label="Fleet size">
+              {SHARES.map((o) => (
+                <button
+                  key={o.share}
+                  type="button"
+                  role="radio"
+                  aria-checked={share === o.share}
+                  disabled={launching}
+                  onClick={() => setShare(o.share)}
+                  className={`flex-1 rounded-md px-2 py-1 text-xs transition ${share === o.share ? "bg-rose-400/25 text-rose-50 ring-1 ring-rose-300/50" : "bg-white/5 text-white/60 hover:bg-white/10"}`}
+                >
+                  {o.label} <span className="tabular-nums text-white/45">({Math.round(military * o.share)})</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          {flying && (
+            <p className="px-4 pt-2 text-xs text-amber-200">
+              🚀 {flying.fleet} soldiers on their way to {flying.to_name}: landing in <span className="tabular-nums">{fleetSecondsLeft(flying)}s</span>
+            </p>
+          )}
+          <div className="flex items-center justify-between gap-4 px-4 py-3">
             <div className="min-w-0">
               <p className="text-xs text-white/40">Target</p>
               <p className="truncate text-sm font-semibold text-white">{selected.planet_name}</p>
@@ -123,7 +160,7 @@ export function GalaxyInvasion({
             </div>
             <button
               type="button"
-              disabled={launching || !spacefaring}
+              disabled={launching || !spacefaring || !!flying}
               onClick={() => void launch()}
               className="shrink-0 rounded-lg border border-rose-300/25 bg-rose-400/20 px-4 py-2 text-xs font-bold text-rose-100 transition hover:bg-rose-400/30 disabled:cursor-wait disabled:opacity-50"
             >

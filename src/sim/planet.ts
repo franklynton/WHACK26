@@ -193,6 +193,7 @@ export const UPGRADES: { id: UpgradeId; name: string; icon: string; description:
 const MAX_PEOPLE = 1500;
 const BIRTHS: Record<Policy, number> = { settle: 1, expand: 1.2, farm: 1.4, worship: 0.9, explore: 1, hoard: 0.6, rebel: 0.8 };
 const STEP_TIME = 0.7; // seconds to walk one tile
+export const SHIELD_COST = 30; // devotion to raise shields against a fleet from another planet
 
 // Attack bonus between planets: rock-paper-scissors on planet type (weakTo above).
 export function invasionBonus(attacker: string, defender: string) {
@@ -2327,6 +2328,95 @@ export class PlanetSim {
   // Military strength (for invading other planets later): a fifth of the population can fight.
   military() {
     return Math.round(this.people.length * 0.2); // one in five people can fight
+  }
+
+  // ---- Invasions between planets (migration 011): soldiers really leave, fly for 30s, and come back ----
+  spaceFleet = 0; // our soldiers away in space right now
+
+  // Soldiers our nation could send to space: its fighting-age people, at most the planet's military.
+  soldiers() {
+    let n = 0;
+    for (const p of this.people) if (p.nation === 0 && p.age > 16 && p.age < 50) n++;
+    return Math.min(n, this.military());
+  }
+
+  // What our fleet is worth: soldiers x how well our race fights. The database adds the planet-type matchup and dice.
+  invasionAttack(fleet: number) {
+    return Math.round(fleet * RACE[this.nations[0]?.race ?? "human"].fight);
+  }
+
+  // How well we hold off a fleet: army plus warships, by race, and better in later eras.
+  defenceStrength() {
+    const nt = this.nations[0];
+    if (!nt) return 0;
+    return Math.round((this.military() + 3 * this.navySize(0)) * RACE[nt.race].fight * (0.6 + 0.05 * eraOf(nt.tech)));
+  }
+
+  // Takes up to n fighting-age people of our nation off the globe and into the fleet. Returns how many went.
+  launchSpaceFleet(n: number) {
+    let left = Math.max(0, Math.floor(n));
+    this.people = this.people.filter((p) => {
+      if (left > 0 && p.nation === 0 && p.age > 16 && p.age < 50) {
+        left--;
+        return false;
+      }
+      return true;
+    });
+    const sent = Math.floor(n) - left;
+    this.spaceFleet += sent;
+    const home = this.nationHome(0);
+    if (sent && home != null) this.announce("🚀", "The fleet launches", `${sent} soldiers left the planet. They land in 30 seconds.`, home, true);
+    return sent;
+  }
+
+  // Our fleet is back: survivors land near home, with whatever they won.
+  fleetHome(other: string, result: string, fleet: number, lost: number, loot: Partial<Resources>) {
+    const back = Math.max(0, Math.min(this.spaceFleet, fleet) - lost);
+    this.spaceFleet = Math.max(0, this.spaceFleet - fleet);
+    const home = this.nationHome(0);
+    if (home == null) return;
+    for (let i = 0; i < back; i++) this.spawnNear(home, 0);
+    const got = Object.entries(loot).filter(([, n]) => Number(n) > 0).map(([r, n]) => `${n} ${r}`).join(", ");
+    const [icon, title, text] =
+      result === "won" ? ["⚔️", "Victory among the stars", `Your fleet invaded ${other}${got ? ` and brought home ${got}` : ""}. ${lost} soldiers fell.`]
+      : result === "tribute" ? ["💰", "Tribute paid", `${other} paid you not to land: ${got || "nothing much"}. The fleet came home whole.`]
+      : result === "recalled" ? ["↩️", "Fleet recalled", `${other} left the galaxy before your fleet arrived. Everyone came home.`]
+      : ["🛡️", "Repelled", `${other}'s defenders drove your fleet back. ${lost} soldiers fell.`];
+    this.announce(icon, title, text, home);
+    this.events.push({ kind: result === "repelled" ? "disaster" : "milestone", detail: text, nation: 0 });
+    if (result === "won" && this.love[0] != null) this.love[0] = Math.min(100, this.love[0] + 5);
+  }
+
+  // The god spends devotion to shield the planet from an incoming fleet.
+  raiseShields() {
+    if (this.devotion < SHIELD_COST) return false;
+    this.devotion -= SHIELD_COST;
+    return true;
+  }
+
+  // A fleet from another planet arrived. Won: raiders land on our coast near the capital, kill people there
+  // and stay as raider ships until sunk. Repelled: a few defenders die. Loot was moved by the database.
+  raidedFromSpace(attacker: string, won: boolean, killed: number, loot: Partial<Resources>, shields: boolean) {
+    const home = this.nationHome(0);
+    if (home == null) return;
+    // The nearest people to the capital fall first, so the fight is where the player is looking.
+    const near = this.people.filter((p) => p.nation === 0).sort((a, b) => this.angle(a.face, home) - this.angle(b.face, home));
+    const dead = new Set(near.slice(0, killed).map((p) => p.id));
+    this.killWhere((p) => dead.has(p.id));
+    if (won) {
+      const port = this.harbour(home);
+      const sea = port >= 0 ? port : [...Array(60)].map(() => Math.floor(Math.random() * this.n)).find((f) => isWater(this.terrain[f] as T));
+      if (sea != null) for (let i = 0; i < 2; i++) this.launch("pirate", -1, sea);
+      const lost = Object.entries(loot).filter(([, n]) => Number(n) > 0).map(([r, n]) => `${n} ${r}`).join(", ");
+      const text = `A fleet from ${attacker} landed near ${this.where(home)}${shields ? " and broke through the shields" : ""}. ${killed} people died${lost ? ` and they took ${lost}` : ""}.`;
+      this.announce("🛸", "Invaded from space!", text, home);
+      this.events.push({ kind: "disaster", detail: text, nation: 0 });
+      if (this.love[0] != null && !shields) this.love[0] = Math.max(0, this.love[0] - 8); // "where was our god?"
+    } else {
+      const text = `A fleet from ${attacker} attacked${shields ? ", but your shields held" : ""}. Your people drove it off${killed ? `, losing ${killed}` : ""}.`;
+      this.announce("🛡️", "Invasion repelled", text, home);
+      this.events.push({ kind: "milestone", detail: text, nation: 0 });
+    }
   }
 
   stats(): PlanetStats {
