@@ -1055,7 +1055,7 @@ function Droughts({ sim }: { sim: PlanetSim }) {
 }
 
 // Ships: warships have a dark hull and a sail in their nation's colour; merchants a light hull and a
-// white sail; pirates are black from bow to sail.
+// white sail; settler boats a light hull and their nation's sail; pirates are black from bow to sail.
 const MAX_SHIPS_DRAWN = 80;
 function Ships({ sim }: { sim: PlanetSim }) {
   const hulls = useRef<THREE.InstancedMesh>(null);
@@ -1082,7 +1082,7 @@ function Ships({ sim }: { sim: PlanetSim }) {
       sail.compose(p.addScaledVector(up, 0.012), q, s.set(1, 1, 1));
       sl.setMatrixAt(i, sail);
       sl.setColorAt(i, c.set(sh.kind === "pirate" ? "#151515" : sh.kind === "merchant" ? "#f4efe2" : (sim.nations[sh.nation]?.color ?? "#ffffff")));
-      h.setColorAt(i, c.set(sh.kind === "pirate" ? "#0d0d0d" : sh.kind === "merchant" ? "#c79a5d" : "#4a3426"));
+      h.setColorAt(i, c.set(sh.kind === "pirate" ? "#0d0d0d" : sh.kind === "merchant" || sh.kind === "settler" ? "#c79a5d" : "#4a3426"));
     });
     h.count = sl.count = ships.length;
     h.instanceMatrix.needsUpdate = true;

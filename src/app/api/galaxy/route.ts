@@ -373,7 +373,7 @@ export async function POST(req: Request) {
       autoCreated = true;
     }
 
-    let { data, error } = await supabase.rpc("join_galaxy", {
+    const { data, error } = await supabase.rpc("join_galaxy", {
       p_world_id: body.worldId,
       p_owner_token: body.ownerToken,
       p_code: chosen,
