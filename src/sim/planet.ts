@@ -1596,6 +1596,11 @@ export class PlanetSim {
         this.revolt.delete(nt.id);
         continue;
       }
+      // Half of all uprisings fizzle out before they start (revolutions are half as likely).
+      if (!this.revolt.has(nt.id) && Math.random() < 0.5) {
+        nt.stability = 30;
+        continue;
+      }
       const since = this.revolt.get(nt.id) ?? this.year;
       if (!this.revolt.has(nt.id)) this.offer("revolution", "Revolution!", `The people of ${nt.name} have risen against their ruler.`, this.capital(nt.id)?.face ?? 0, [nt.id]);
       this.revolt.set(nt.id, since);
@@ -1766,7 +1771,11 @@ export class PlanetSim {
         if (rel === "peace" && t < 25) next = "trade"; // caravans travel even without a shared border
         else if (rel === "peace" && t > 55) next = "rival";
         else if (rel === "trade" && t > 45) next = "peace";
-        else if (rel === "rival" && t > 75) next = "war";
+        else if (rel === "rival" && t > 75) {
+          // Half the time cooler heads win: tension eases instead (wars are half as likely).
+          if (Math.random() < 0.5) next = "war";
+          else this.tension[a][b] = this.tension[b][a] = 60;
+        }
         else if (rel === "rival" && t < 40) next = "peace";
         else if (rel === "war" && t < 35) next = "peace";
         if (next !== rel) {
