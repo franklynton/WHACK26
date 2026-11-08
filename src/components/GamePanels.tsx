@@ -277,7 +277,7 @@ export function UpgradeMenu({
   };
   return (
     <section
-      className="glass absolute left-[17.5rem] top-[14.5rem] z-30 w-96 max-w-[calc(100vw-20rem)] p-4 shadow-2xl"
+      className="glass absolute left-[17.5rem] top-[14.5rem] z-50 w-96 !bg-[#0f1223]/95 max-w-[calc(100vw-20rem)] p-4 shadow-2xl"
       aria-label="World upgrades"
     >
       <div className="mb-3 flex items-start justify-between border-b border-white/10 pb-3">
