@@ -96,7 +96,7 @@ export function GameRightPanel({
 }) {
   return (
     <aside className="glass subtle-scrollbar absolute bottom-4 right-4 top-4 flex w-72 flex-col p-4">
-      <div className="absolute right-full top-0 z-30 mr-4 rounded-2xl border border-white/10 bg-[#111827]/75 shadow-lg backdrop-blur-md">
+      <div className="absolute right-full top-0 z-30 mr-2 rounded-2xl border border-white/10 bg-[#111827]/75 shadow-lg backdrop-blur-md">
         <SettingsPopover
           open={settingsOpen}
           onToggle={onSettingsToggle}

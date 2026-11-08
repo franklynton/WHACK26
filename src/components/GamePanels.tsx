@@ -5,12 +5,7 @@ import type { PlanetSim } from "@/sim/planet";
 import { UPGRADES } from "@/sim/planet";
 import { ERAS, RACE } from "@/sim/races";
 import type { GalaxyStatus } from "./Galaxy";
-import type {
-  NationInfo,
-  Policy,
-  Relation,
-  Resources,
-} from "@/types/world";
+import type { NationInfo, Policy, Relation, Resources } from "@/types/world";
 
 export const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
 
@@ -95,7 +90,10 @@ export function NationList({
                         aria-label={`${cap(nation.crisis)} needs attention`}
                       />
                     )}
-                    <span className="flex items-center gap-1 text-xs tabular-nums text-white/60" title="People">
+                    <span
+                      className="flex items-center gap-1 text-xs tabular-nums text-white/60"
+                      title="People"
+                    >
                       <svg
                         aria-hidden="true"
                         className="h-3.5 w-3.5 text-slate-400"
@@ -128,19 +126,28 @@ export function NationList({
                     <dl className="space-y-1.5">
                       <div className="flex items-center justify-between gap-3">
                         <dt className="text-white/40">Era</dt>
-                        <dd className="font-medium text-amber-200/80">{ERAS[nation.era]}</dd>
+                        <dd className="font-medium text-amber-200/80">
+                          {ERAS[nation.era]}
+                        </dd>
                       </div>
                       <div className="flex items-center justify-between gap-3">
                         <dt className="text-white/40">Settlements</dt>
-                        <dd>{nation.villages} {nation.villages === 1 ? "village" : "villages"}</dd>
+                        <dd>
+                          {nation.villages}{" "}
+                          {nation.villages === 1 ? "village" : "villages"}
+                        </dd>
                       </div>
                       <div className="flex items-center justify-between gap-3">
                         <dt className="text-white/40">Current focus</dt>
-                        <dd className="text-right">{POLICY_LABEL[nation.policy]}</dd>
+                        <dd className="text-right">
+                          {POLICY_LABEL[nation.policy]}
+                        </dd>
                       </div>
                       <div className="flex items-center justify-between gap-3">
                         <dt className="text-white/40">Leader</dt>
-                        <dd className="text-right">{nation.leader.title} {nation.leader.name}</dd>
+                        <dd className="text-right">
+                          {nation.leader.title} {nation.leader.name}
+                        </dd>
                       </div>
                       {!!nation.ships && (
                         <div className="flex items-center justify-between gap-3">
@@ -150,7 +157,13 @@ export function NationList({
                       )}
                       <div className="flex items-center justify-between gap-3">
                         <dt className="text-white/40">Status</dt>
-                        <dd className={nation.crisis ? "font-semibold text-rose-300" : "text-emerald-300/80"}>
+                        <dd
+                          className={
+                            nation.crisis
+                              ? "font-semibold text-rose-300"
+                              : "text-emerald-300/80"
+                          }
+                        >
                           {nation.crisis ? cap(nation.crisis) : "Stable"}
                         </dd>
                       </div>
@@ -161,22 +174,28 @@ export function NationList({
                           Relations
                         </p>
                         <div className="space-y-1.5">
-                        {nation.relations.map((relation) => (
-                          <div
-                            key={relation.id}
-                            className="flex items-center justify-between gap-2"
-                          >
-                            <span className="min-w-0 truncate">
-                              <span className="inline-flex w-5 shrink-0 justify-center" aria-hidden="true">
-                                {RELATION_STYLE[relation.relation].icon}
+                          {nation.relations.map((relation) => (
+                            <div
+                              key={relation.id}
+                              className="flex items-center justify-between gap-2"
+                            >
+                              <span className="min-w-0 truncate">
+                                <span
+                                  className="inline-flex w-5 shrink-0 justify-center"
+                                  aria-hidden="true"
+                                >
+                                  {RELATION_STYLE[relation.relation].icon}
+                                </span>
+                                {cap(nations[relation.id].name)}
                               </span>
-                              {cap(nations[relation.id].name)}
-                            </span>
-                            <span className={`shrink-0 text-[11px] ${RELATION_STYLE[relation.relation].cls}`}>
-                              {RELATION_STYLE[relation.relation].label} · Tension: {relation.tension}
-                            </span>
-                          </div>
-                        ))}
+                              <span
+                                className={`shrink-0 text-[11px] ${RELATION_STYLE[relation.relation].cls}`}
+                              >
+                                {RELATION_STYLE[relation.relation].label} ·
+                                Tension: {relation.tension}
+                              </span>
+                            </div>
+                          ))}
                         </div>
                       </div>
                     )}
@@ -237,14 +256,16 @@ export function SettingsPopover({
         </svg>
       </button>
       {open && (
-        <div className="absolute right-0 top-14 z-30 w-56 rounded-xl border border-white/10 bg-[#111827]/90 p-2 shadow-2xl backdrop-blur-xl">
+        <div className="absolute right-0 top-13 z-30 w-56 rounded-xl border border-white/10 bg-[#111827]/90 p-2 shadow-2xl backdrop-blur-xl">
           {onNewPlanet && (
             <button
               onClick={() => {
                 onClose();
                 if (
                   demo ||
-                  confirm("Start over on a new planet? This planet will be lost.")
+                  confirm(
+                    "Start over on a new planet? This planet will be lost.",
+                  )
                 ) {
                   onNewPlanet();
                 }
@@ -276,7 +297,9 @@ export function SettingsPopover({
           </button>
           <div
             className={`mx-2 mt-1 flex items-center gap-2 rounded-lg px-1 py-2 text-xs ${
-              link.enabled && link.members ? "text-emerald-200" : "text-white/45"
+              link.enabled && link.members
+                ? "text-emerald-200"
+                : "text-white/45"
             }`}
           >
             <span
