@@ -375,7 +375,7 @@ export default function Galaxy({
             setDraft(typeCode(e.target.value));
             setError("");
           }}
-          placeholder="NOTTS"
+          placeholder="ORBIT"
           aria-invalid={!!error}
           aria-describedby={error ? "galaxy-error" : undefined}
           className={`min-w-0 flex-1 rounded-lg bg-white/10 px-3 py-1.5 font-mono text-sm uppercase outline-none placeholder:text-white/30 ${error ? "ring-1 ring-rose-400" : "focus:ring-1 focus:ring-indigo-300"}`}

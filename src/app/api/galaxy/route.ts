@@ -27,6 +27,29 @@ const PUBLIC_COLUMNS = "world_id, owner_name, planet_name, planet_type, populati
 const ONLINE_MS = 30 * 1000; // a god that hasn't synced for 30s is gone (the database drops them from their galaxy too)
 const isUuid = (x: string | null) => /^[0-9a-f-]{36}$/i.test(x ?? "");
 
+const GALAXY_WORDS = [
+  "ABBEY", "ACORN", "AMBER", "APPLE", "ARBOR", "ASTRA", "BASIL", "BEACH", "BERRY", "BLAZE",
+  "BLOOM", "BRAVE", "BRIAR", "CEDAR", "CHARM", "CHEST", "CLOUD", "CORAL", "CROWN",
+  "DRIFT", "EMBER", "FERNS", "FLAME", "FLORA", "FROST", "GLADE", "GLOBE", "GRACE",
+  "GROVE", "HAVEN", "HAZEL", "HONEY", "IVORY", "LANCE", "LIGHT", "LOTUS", "MAPLE",
+  "MISTY", "MOSSY", "OASIS", "OCEAN", "ORBIT", "PEACH", "PEARL",
+  "PLUME", "PRISM", "RIVER", "ROBIN", "ROSES", "SHORE", "SOLAR", "SPARK",
+  "STONE", "THORN", "TIDES", "TULIP", "ULTRA", "VISTA", "WINGS",
+];
+
+function randomGalaxyWord(existing: Set<string>) {
+  const unused = GALAXY_WORDS.filter((word) => word.length === 5 && !existing.has(word));
+  if (!unused.length) throw new Error("Unable to generate a unique galaxy name");
+
+  const word = unused[Math.floor(Math.random() * unused.length)];
+  for (let attempt = 0; attempt < 1000; attempt++) {
+    const digits = String(Math.floor(Math.random() * 10000)).padStart(4, "0");
+    const code = `${word}${digits}`;
+    if (!existing.has(code)) return code;
+  }
+  throw new Error("Unable to generate a unique galaxy code");
+}
+
 // GET ?peek=CODE: how full a galaxy is, without joining (for the landing page).
 // GET ?worldId=...: the galaxy this planet is in, the other gods in it, plus the trades and invasions
 // that touched this planet since action `since` (so the game can apply them; it gets them even after
@@ -290,9 +313,7 @@ export async function POST(req: Request) {
     let autoCreated = false;
     if (action === "random_create" || !chosen) {
       const existingCodes = new Set((galaxies ?? []).map((galaxy) => galaxy.code));
-      do {
-        chosen = String(10000 + Math.floor(Math.random() * 90000));
-      } while (existingCodes.has(chosen));
+      chosen = randomGalaxyWord(existingCodes);
       const { error: createError } = await supabase.from("galaxies").insert({ code: chosen });
       if (createError) return galaxyError(createError, "random_join");
       autoCreated = true;
@@ -310,10 +331,7 @@ export async function POST(req: Request) {
     // For random join, that must mean "create and join", not return not_found to the UI.
     if (action === "random_join" && data?.ok === false && data.reason === "not_found") {
       const existingCodes = new Set((galaxies ?? []).map((galaxy) => galaxy.code));
-      let replacement: string;
-      do {
-        replacement = String(10000 + Math.floor(Math.random() * 90000));
-      } while (existingCodes.has(replacement));
+      const replacement = randomGalaxyWord(existingCodes);
       const { error: createError } = await supabase.from("galaxies").insert({ code: replacement });
       if (createError) return galaxyError(createError, "random_join");
       chosen = replacement;
