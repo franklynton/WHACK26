@@ -67,7 +67,16 @@ interface MarketPricePoint {
 
 const RESOURCES = ["food", "wood", "stone", "metal", "gold", "herbs"] as const;
 
-function MarketChart({ base, points }: { base: number; points: MarketPricePoint[] }) {
+const RESOURCE_STYLE: Record<keyof Resources, { label: string; button: string; active: string; chart: string; text: string }> = {
+  food: { label: "Food", button: "border-lime-300/20 bg-lime-400/10 text-lime-100", active: "bg-lime-400/25 ring-lime-300/50", chart: "#a3e635", text: "text-lime-200" },
+  wood: { label: "Wood", button: "border-amber-300/20 bg-amber-400/10 text-amber-100", active: "bg-amber-400/25 ring-amber-300/50", chart: "#fbbf24", text: "text-amber-200" },
+  stone: { label: "Stone", button: "border-slate-300/20 bg-slate-300/10 text-slate-100", active: "bg-slate-300/25 ring-slate-300/50", chart: "#cbd5e1", text: "text-slate-200" },
+  metal: { label: "Metal", button: "border-cyan-300/20 bg-cyan-400/10 text-cyan-100", active: "bg-cyan-400/25 ring-cyan-300/50", chart: "#22d3ee", text: "text-cyan-200" },
+  gold: { label: "Gold", button: "border-yellow-300/20 bg-yellow-400/10 text-yellow-100", active: "bg-yellow-400/25 ring-yellow-300/50", chart: "#facc15", text: "text-yellow-200" },
+  herbs: { label: "Herbs", button: "border-fuchsia-300/20 bg-fuchsia-400/10 text-fuchsia-100", active: "bg-fuchsia-400/25 ring-fuchsia-300/50", chart: "#e879f9", text: "text-fuchsia-200" },
+};
+
+function MarketChart({ base, points, resource }: { base: number; points: MarketPricePoint[]; resource: keyof Resources }) {
   const values = points.length ? points.map((point) => Number(point.price)) : [base];
   const min = Math.max(0, Math.min(base, ...values) - 1);
   const max = Math.max(base, ...values) + 1;
@@ -78,16 +87,24 @@ function MarketChart({ base, points }: { base: number; points: MarketPricePoint[
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   });
   const current = values[values.length - 1];
+  const previous = values.length > 1 ? values[values.length - 2] : base;
+  const changePercent = base > 0 ? ((current - previous) / previous) * 100 : 0;
+  const style = RESOURCE_STYLE[resource] ?? RESOURCE_STYLE.gold;
 
   return (
     <div className="mt-2 rounded-lg border border-white/[0.07] bg-black/10 px-3 py-2">
       <div className="mb-1 flex items-center justify-between text-xs">
         <span className="text-white/55">Price history</span>
-        <span className="font-semibold text-amber-200">{current.toLocaleString()} credits</span>
+        <span className={`font-semibold ${style.text}`}>
+          {current.toLocaleString()} credits
+          <span className="ml-2 text-[10px]">
+            {changePercent >= 0 ? "+" : ""}{changePercent.toFixed(1)}%
+          </span>
+        </span>
       </div>
       <svg viewBox="0 0 320 96" className="h-16 w-full" role="img" aria-label={`Current price ${current} credits`}>
         {[0, 46, 92].map((y) => <line key={y} x1="4" x2="316" y1={y} y2={y} className="stroke-white/10" strokeWidth="1" />)}
-        <polyline points={coordinates.join(" ")} fill="none" className="stroke-amber-300" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+        <polyline points={coordinates.join(" ")} fill="none" stroke={style.chart} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
       </svg>
     </div>
   );
@@ -146,13 +163,19 @@ export default function Galaxy({
   const [credits, setCredits] = useState(1000);
   const [tab, setTab] = useState<"invade" | "market" | "offers">("invade");
   const marketOpen = tab === "market";
+  const [marketOrderPanel, setMarketOrderPanel] = useState<"buy" | "sell" | null>(null);
   const [marketPrices, setMarketPrices] = useState<MarketPrice[]>([]);
   const [marketHistory, setMarketHistory] = useState<MarketPricePoint[]>([]);
+  const [simulatedHistory, setSimulatedHistory] = useState<MarketPricePoint[]>([]);
 
   useEffect(() => {
     if (!open) return;
     if (view === "market" || view === "invade" || view === "offers") setTab(view);
   }, [open, view]);
+
+  useEffect(() => {
+    if (!open) setMarketOrderPanel(null);
+  }, [open]);
 
   // This planet's id and the secret token that owns its row. The demo is a separate planet, so it gets its own.
   const [ids] = useState(() => ({ world: stored(`arda-world-id${demo ? "-demo" : ""}`), token: stored(`arda-owner-token${demo ? "-demo" : ""}`) }));
@@ -226,10 +249,12 @@ export default function Galaxy({
       setMarketOrders((data.orders ?? []) as MarketOrder[]);
       setMarketTrades((data.trades ?? []) as MarketTrade[]);
       setMarketPrices((data.prices ?? []) as MarketPrice[]);
-      setMarketHistory((data.history ?? []) as MarketPricePoint[]);
       // Credits live only in the database. Resources reach the game through the sync (migration 008),
       // so the market never overwrites what the planet has produced since.
       const me = data.me as { credits?: number } | null;
+      const history = (data.history ?? []) as MarketPricePoint[];
+      setMarketHistory(history);
+      setSimulatedHistory((current) => current.length === 0 ? history : current);
       if (me?.credits != null) {
         setCredits(Number(me.credits));
         sim.marketCredits = Math.max(0, Math.floor(Number(me.credits)));
@@ -359,6 +384,7 @@ export default function Galaxy({
     });
     setMessage(data.error || `Order ${data.status ?? "placed"}${data.remaining != null ? ` (${data.remaining} remaining)` : ""}`);
     await sync(); // brings the held goods and any fill into the game
+    if (!data.error) setMarketOrderPanel(null);
     await loadMarket();
   };
 
@@ -566,7 +592,7 @@ export default function Galaxy({
                   <button
                     key={item}
                     onClick={() => setMarketResource(item)}
-                    className={`rounded-full px-2.5 py-1 text-xs capitalize transition ${marketResource === item ? "bg-amber-400/20 text-amber-100" : "text-white/45 hover:bg-white/5 hover:text-white"}`}
+                    className={`rounded-full border px-2.5 py-1 text-xs capitalize transition ${RESOURCE_STYLE[item].button} ${marketResource === item ? `${RESOURCE_STYLE[item].active} ring-1` : "opacity-50 hover:opacity-100"}`}
                   >
                     {item}
                   </button>
@@ -577,50 +603,118 @@ export default function Galaxy({
             <MarketChart
               base={marketPrices.find((price) => price.resource === marketResource)?.base_price ?? 10}
               points={marketHistory.filter((point) => point.resource === marketResource)}
+              resource={marketResource}
             />
-            <div className="mt-3 grid grid-cols-[8rem_1fr_1fr] items-end gap-2">
-              <div className="grid grid-cols-2 gap-1 rounded-lg bg-white/5 p-1">
-                {(["buy", "sell"] as const).map((side) => (
-                  <button key={side} onClick={() => setMarketSide(side)} className={`rounded-md px-2 py-1.5 text-xs capitalize ${marketSide === side ? (side === "buy" ? "bg-emerald-400/20 text-emerald-100" : "bg-rose-400/20 text-rose-100") : "text-white/45"}`}>
-                    {side}
-                  </button>
-                ))}
+            <div className="mt-3 grid grid-cols-[1fr_1fr_auto] items-center gap-2">
+              <div className="rounded-lg border border-emerald-300/10 bg-emerald-400/[0.07] px-3 py-2">
+                <p className="text-[10px] uppercase tracking-[0.08em] text-emerald-200/60">Best bid</p>
+                <p className="mt-0.5 text-sm font-semibold text-emerald-100">
+                  {Math.max(0, ...marketOrders.filter((o) => o.side === "buy" && o.resource === marketResource).map((o) => o.price)) || "--"} <span className="text-[11px] font-normal text-white/40">credits</span>
+                </p>
               </div>
-              <label className="text-xs text-white/45">Credits / unit
-                <input type="number" min={1} max={1000000000} value={marketPrice} onChange={(e) => setMarketPrice(Math.max(1, Number(e.target.value) || 1))} className="mt-1 w-full rounded bg-white/10 px-2 py-1 text-white" />
-              </label>
-              <label className="text-xs text-white/60">Quantity
-                <input type="number" min={1} max={100000} value={marketQuantity} onChange={(e) => setMarketQuantity(Math.max(1, Number(e.target.value) || 1))} className="mt-1 w-full rounded bg-white/10 px-2 py-1 text-white" />
-              </label>
-            </div>
-            <button onClick={placeMarketOrder} className="mt-2 w-full rounded bg-indigo-400/25 px-3 py-1.5 text-xs font-semibold text-indigo-100 hover:bg-indigo-400/35">
-              Place {marketSide} order
-            </button>
-
-            <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-              <div>
-                <p className="mb-1 font-semibold text-emerald-200">Bids</p>
-                {marketOrders.filter((o) => o.side === "buy" && o.resource === marketResource).sort((a, b) => b.price - a.price || a.created_at.localeCompare(b.created_at)).slice(0, 8).map((o) => (
-                  <div key={o.id} className="flex justify-between border-t border-white/5 py-1">
-                    <span>{o.remaining} × {o.price}</span>
-                    {o.world_id === ids.world ? <button onClick={() => cancelMarketOrder(o.id)} className="text-rose-300">Cancel</button> : <span className="text-white/35">bid</span>}
-                  </div>
-                ))}
+              <div className="rounded-lg border border-rose-300/10 bg-rose-400/[0.07] px-3 py-2">
+                <p className="text-[10px] uppercase tracking-[0.08em] text-rose-200/60">Best ask</p>
+                <p className="mt-0.5 text-sm font-semibold text-rose-100">
+                  {marketOrders.filter((o) => o.side === "sell" && o.resource === marketResource).length ? Math.min(...marketOrders.filter((o) => o.side === "sell" && o.resource === marketResource).map((o) => o.price)) : "--"} <span className="text-[11px] font-normal text-white/40">credits</span>
+                </p>
               </div>
-              <div>
-                <p className="mb-1 font-semibold text-rose-200">Asks</p>
-                {marketOrders.filter((o) => o.side === "sell" && o.resource === marketResource).sort((a, b) => a.price - b.price || a.created_at.localeCompare(b.created_at)).slice(0, 8).map((o) => (
-                  <div key={o.id} className="flex justify-between border-t border-white/5 py-1">
-                    <span>{o.remaining} × {o.price}</span>
-                    {o.world_id === ids.world ? <button onClick={() => cancelMarketOrder(o.id)} className="text-rose-300">Cancel</button> : <span className="text-white/35">ask</span>}
-                  </div>
-                ))}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setMarketSide("buy");
+                    setMarketOrderPanel("buy");
+                  }}
+                  className="min-w-20 rounded-lg border border-emerald-300/20 bg-emerald-400/15 px-4 py-2 text-sm font-semibold text-emerald-100 hover:bg-emerald-400/25"
+                >
+                  Buy
+                </button>
+                <button
+                  onClick={() => {
+                    setMarketSide("sell");
+                    setMarketOrderPanel("sell");
+                  }}
+                  className="min-w-20 rounded-lg border border-rose-300/20 bg-rose-400/15 px-4 py-2 text-sm font-semibold text-rose-100 hover:bg-rose-400/25"
+                >
+                  Sell
+                </button>
               </div>
             </div>
             {marketTrades.length > 0 && (
-              <p className="mt-2 border-t border-white/10 pt-2 text-xs text-white/55">
-                Last: {marketTrades[0].quantity} {marketTrades[0].resource} at {marketTrades[0].price} credits
-              </p>
+              <div className="mt-2 flex items-center justify-between border-t border-white/[0.07] pt-2 text-xs text-white/45">
+                <span>Last trade</span>
+                <span>{marketTrades[0].quantity} {marketTrades[0].resource} at <strong className="text-white/70">{marketTrades[0].price} credits</strong></span>
+              </div>
+            )}
+
+            {marketOrderPanel && (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/55 backdrop-blur-sm" onClick={() => setMarketOrderPanel(null)}>
+                <div
+                  className="w-[28rem] rounded-2xl border border-white/10 bg-[#111425]/95 p-4 shadow-2xl"
+                  onClick={(e) => e.stopPropagation()}
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label={`${marketOrderPanel} ${marketResource} order`}
+                >
+                  <div className="mb-4 flex items-center justify-between">
+                    <div>
+                      <p className="text-base font-semibold capitalize">{marketOrderPanel} {marketResource}</p>
+                      <p className="mt-0.5 text-xs text-white/45">{credits.toLocaleString()} credits available</p>
+                    </div>
+                    <button onClick={() => setMarketOrderPanel(null)} className="rounded-lg px-2 py-1 text-white/45 hover:bg-white/5 hover:text-white" aria-label="Close order form">✕</button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="text-xs text-white/55">Credits / unit
+                      <input
+                        type="number"
+                        min={1}
+                        max={1000000000}
+                        value={marketPrice}
+                        onChange={(e) => setMarketPrice(Math.max(1, Number(e.target.value) || 1))}
+                        className="mt-1 w-full rounded-lg border border-white/[0.08] bg-white/[0.07] px-3 py-2 text-sm text-white outline-none focus:border-white/20"
+                      />
+                    </label>
+                    <label className="text-xs text-white/55">Quantity
+                      <input
+                        type="number"
+                        min={1}
+                        max={100000}
+                        value={marketQuantity}
+                        onChange={(e) => setMarketQuantity(Math.max(1, Number(e.target.value) || 1))}
+                        className="mt-1 w-full rounded-lg border border-white/[0.08] bg-white/[0.07] px-3 py-2 text-sm text-white outline-none focus:border-white/20"
+                      />
+                    </label>
+                  </div>
+
+                  <button
+                    onClick={placeMarketOrder}
+                    className={`mt-3 w-full rounded-lg px-3 py-2 text-sm font-semibold ${marketOrderPanel === "buy" ? "bg-emerald-400/20 text-emerald-100 hover:bg-emerald-400/30" : "bg-rose-400/20 text-rose-100 hover:bg-rose-400/30"}`}
+                  >
+                    Place {marketOrderPanel} order
+                  </button>
+
+                  <div className="mt-4 grid grid-cols-2 gap-3 border-t border-white/[0.07] pt-3 text-xs">
+                    <div>
+                      <p className="mb-1 font-semibold text-emerald-200">Bids</p>
+                      {marketOrders.filter((o) => o.side === "buy" && o.resource === marketResource).sort((a, b) => b.price - a.price || a.created_at.localeCompare(b.created_at)).slice(0, 6).map((o) => (
+                        <div key={o.id} className="flex justify-between border-t border-white/[0.05] py-1.5">
+                          <span>{o.remaining} × {o.price}</span>
+                          {o.world_id === ids.world ? <button onClick={() => cancelMarketOrder(o.id)} className="text-rose-300 hover:text-rose-200">Cancel</button> : <span className="text-white/30">bid</span>}
+                        </div>
+                      ))}
+                    </div>
+                    <div>
+                      <p className="mb-1 font-semibold text-rose-200">Asks</p>
+                      {marketOrders.filter((o) => o.side === "sell" && o.resource === marketResource).sort((a, b) => a.price - b.price || a.created_at.localeCompare(b.created_at)).slice(0, 6).map((o) => (
+                        <div key={o.id} className="flex justify-between border-t border-white/[0.05] py-1.5">
+                          <span>{o.remaining} × {o.price}</span>
+                          {o.world_id === ids.world ? <button onClick={() => cancelMarketOrder(o.id)} className="text-rose-300 hover:text-rose-200">Cancel</button> : <span className="text-white/30">ask</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
         )}
