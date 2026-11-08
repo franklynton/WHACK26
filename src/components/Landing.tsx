@@ -83,7 +83,7 @@ export default function Landing({ onStart }: { onStart: (playerName: string, pla
         </div>
 
         <div className="relative mx-auto mt-4 w-full text-left">
-        <form onSubmit={start} className="glass mx-auto flex w-full max-w-[500px] flex-col gap-1.5 p-3 text-left">
+        <form onSubmit={start} className="glass mx-auto flex w-full max-w-[520px] flex-col gap-3 p-4 text-left">
           <label htmlFor="name" className="label">
             Your name
           </label>
