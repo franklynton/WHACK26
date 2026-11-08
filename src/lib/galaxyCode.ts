@@ -50,3 +50,25 @@ export function joinError(reason: string | undefined, code: string, members?: nu
   if (reason === "not_migrated") return "Galaxy rooms aren't set up yet: run migration 003 in Supabase.";
   return "Couldn't reach the galaxy. Try again.";
 }
+
+// A planet the god threw away ("New planet", or leaving the demo) leaves its galaxy at once, so the
+// other gods stop seeing it, and the next planet gets a new id instead of taking over the old row.
+export function forgetPlanet(demo = false) {
+  try {
+    const suffix = demo ? "-demo" : "";
+    const worldId = localStorage.getItem(`arda-world-id${suffix}`);
+    const ownerToken = localStorage.getItem(`arda-owner-token${suffix}`);
+    if (worldId && ownerToken) {
+      // keepalive: the request still goes if the page is reloaded straight after
+      void fetch("/api/galaxy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "leave", worldId, ownerToken }),
+        keepalive: true,
+      }).catch(() => {});
+    }
+    localStorage.removeItem(`arda-world-id${suffix}`);
+    localStorage.removeItem(`arda-owner-token${suffix}`);
+    if (!demo) localStorage.removeItem(KEY); // a new planet starts alone, not in the old galaxy
+  } catch {}
+}
