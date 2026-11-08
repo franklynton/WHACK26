@@ -160,9 +160,9 @@ export function GalaxyInvasion({
             </div>
             <button
               type="button"
-              disabled={launching || !spacefaring || !!flying}
+              disabled={launching || !!flying}
               onClick={() => void launch()}
-              className="shrink-0 rounded-lg border border-rose-300/25 bg-rose-400/20 px-4 py-2 text-xs font-bold text-rose-100 transition hover:bg-rose-400/30 disabled:cursor-wait disabled:opacity-50"
+              className="shrink-0 rounded-lg border border-rose-300/25 bg-rose-400/20 px-4 py-2 text-xs font-bold text-rose-100 transition hover:bg-rose-400/30 disabled:cursor-wait"
             >
               {launching ? "Fleet in flight…" : invasionResult ? "Invade again" : "Launch invasion"}
             </button>

@@ -357,10 +357,15 @@ export async function POST(req: Request) {
       }
     }
 
-    // No available galaxy means random join should automatically create a fresh one.
-    // The explicit create flow also always generates a fresh room.
+    // Random join only joins an existing available room. If none exist or all are full,
+    // return an actionable error instead of secretly creating a galaxy.
+    if (action === "random_join" && !chosen) {
+      return NextResponse.json({ ok: false, reason: "no_available" });
+    }
+
+    // The explicit create flow always generates a fresh room.
     let autoCreated = false;
-    if (action === "random_create" || !chosen) {
+    if (action === "random_create") {
       const existingCodes = new Set((galaxies ?? []).map((galaxy) => galaxy.code));
       chosen = randomGalaxyWord(existingCodes);
       const { error: createError } = await supabase.from("galaxies").insert({ code: chosen });
@@ -376,29 +381,17 @@ export async function POST(req: Request) {
     if (notMigrated(error)) return NextResponse.json({ ok: false, reason: "not_migrated" }, { status: 503 });
     if (error) return galaxyError(error, "join_galaxy");
 
-    // A room can disappear between the room/count lookup and the join RPC.
-    // For random join, that must mean "create and join", not return not_found to the UI.
-    if (action === "random_join" && data?.ok === false && data.reason === "not_found") {
-      const existingCodes = new Set((galaxies ?? []).map((galaxy) => galaxy.code));
-      const replacement = randomGalaxyWord(existingCodes);
-      const { error: createError } = await supabase.from("galaxies").insert({ code: replacement });
-      if (createError) return galaxyError(createError, "random_join");
-      chosen = replacement;
-      ({ data, error } = await supabase.rpc("join_galaxy", {
-        p_world_id: body.worldId,
-        p_owner_token: body.ownerToken,
-        p_code: chosen,
-      }));
-      if (notMigrated(error)) return NextResponse.json({ ok: false, reason: "not_migrated" }, { status: 503 });
-      if (error) return galaxyError(error, "join_galaxy");
-      autoCreated = true;
+    // A room can disappear or fill between the room/count lookup and the join RPC.
+    // In either case, do not create one behind the user's back.
+    if (action === "random_join" && data?.ok === false && ["not_found", "full"].includes(data.reason)) {
+      return NextResponse.json({ ok: false, reason: "no_available" });
     }
 
     if ((action === "random_create" || autoCreated) && data?.ok) data.created = true;
     return NextResponse.json(data);
   }
 
-  // Join an existing galaxy, or leave the one you're in. Automatic galaxy creation uses random_join.
+  // Join an existing galaxy, or leave the one you're in. Random join never creates a galaxy; random_create is explicit.
   if (action === "join" || action === "leave") {
     if (!isUuid(String(body.worldId ?? "")) || !body.ownerToken) {
       return NextResponse.json({ error: "Missing planet or owner token" }, { status: 400 });

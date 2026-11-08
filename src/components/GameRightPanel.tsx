@@ -170,10 +170,10 @@ export function GameRightPanel({
             ["market", "", "Market", "Trade resources"],
             ["offers", "", "Offers", "Swap with a god"],
           ] as const).map(([view, icon, label, action]) => {
-            const disabled = !link.galaxy || (view === "invade" && !spacefaring);
+            const disabled = view === "invade" ? false : !link.galaxy;
             const className =
               view === "invade"
-                ? "group rounded-lg border border-rose-300/15 bg-rose-400/10 px-3 py-3 text-left transition hover:border-rose-300/30 hover:bg-rose-400/20 disabled:cursor-not-allowed disabled:border-white/5 disabled:bg-white/[0.03] disabled:text-white/30"
+                ? "group rounded-lg border border-rose-300/15 bg-rose-400/10 px-3 py-3 text-left text-rose-100 transition hover:border-rose-300/30 hover:bg-rose-400/20"
                 : view === "market"
                   ? "group rounded-lg border border-amber-300/15 bg-amber-400/10 px-3 py-3 text-left transition hover:border-amber-300/30 hover:bg-amber-400/20 disabled:cursor-not-allowed disabled:border-white/5 disabled:bg-white/[0.03] disabled:text-white/30"
                   : "group rounded-lg border border-sky-300/15 bg-sky-400/10 px-3 py-3 text-left transition hover:border-sky-300/30 hover:bg-sky-400/20 disabled:cursor-not-allowed disabled:border-white/5 disabled:bg-white/[0.03] disabled:text-white/30";
