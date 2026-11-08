@@ -286,6 +286,8 @@ export async function POST(req: Request) {
       do {
         chosen = String(10000 + Math.floor(Math.random() * 90000));
       } while (existingCodes.has(chosen));
+      const { error: createError } = await supabase.from("galaxies").insert({ code: chosen });
+      if (createError) return galaxyError(createError, "random_join");
     }
 
     const { data, error } = await supabase.rpc("join_galaxy", {

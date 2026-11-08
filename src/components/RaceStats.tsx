@@ -44,7 +44,7 @@ export default function RaceStats({ race, compact = false }: { race: RaceId; com
   const gather = (Object.entries(r.yield) as [keyof Resources, number][]).sort((a, b) => b[1] - a[1]);
   return (
     <div className={compact ? "space-y-1" : "space-y-1.5"}>
-      <p className="text-[11px] text-white/45">Compared to humans: a human is 50/100 and ×1 (the white line). Score = 50 × the multiplier.</p>
+      {!compact && <p className="text-[11px] text-white/45">Compared to humans: a human is 50/100 and ×1 (the white line). Score = 50 × the multiplier.</p>}
       {raceStats(r).map((s) => {
         const tone = s.better > 0 ? "bg-emerald-400" : s.better < 0 ? "bg-rose-400" : "bg-sky-300";
         const text = s.better > 0 ? "text-emerald-300" : s.better < 0 ? "text-rose-300" : "text-white/60";

@@ -43,6 +43,7 @@ export function setWantedGalaxy(code: string | null) {
 // The message for a failed join, worded like a form error.
 export function joinError(reason: string | undefined, code: string, members?: number) {
   if (reason === "full") return `Galaxy ${code} is full (${members ?? GALAXY_MAX}/${GALAXY_MAX} gods). Try another code.`;
+  if (reason === "not_found") return `Galaxy ${code} does not exist. Check the name or leave this blank to play alone.`;
   if (reason === "invalid") return CODE_RULE;
   if (reason === "not_migrated") return "Galaxy rooms aren't set up yet: run migration 003 in Supabase.";
   return "Couldn't reach the galaxy. Try again.";

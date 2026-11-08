@@ -254,8 +254,7 @@ export default function Galaxy({
   };
 
   const createRandomGalaxy = async () => {
-    const code = String(10000 + Math.floor(Math.random() * 90000));
-    await join(code);
+    await joinRandomGalaxy();
   };
 
   const joinRandomGalaxy = async () => {
