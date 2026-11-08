@@ -7,16 +7,21 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Globe from "./Globe";
 import Galaxy, { type GalaxyStatus } from "./Galaxy";
 import LeaderDialog from "./LeaderDialog";
-import Portrait, { type Mood } from "./Portrait";
-import { ERAS, RACE, type RaceId } from "@/sim/races";
+import type { Mood } from "./Portrait";
+import { NationList } from "./GamePanels";
 import {
-  CHOICE_LIFE,
-  GOAL_YEAR,
+  OutcomeDialog,
+  PlanetSummary,
+  ResourcePanel,
+} from "./GameHud";
+import { GameRightPanel } from "./GameRightPanel";
+import { GameOverlays } from "./GameOverlays";
+import { NationHoverCard } from "./GameHoverCards";
+import { type RaceId } from "@/sim/races";
+import {
   MIRACLES,
-  PRAYER_LIFE,
   PLANET_TYPES,
   PlanetSim,
-  SECONDS_PER_YEAR,
   UPGRADES,
   type MiracleId,
   type SimEvent,
@@ -41,8 +46,6 @@ import type {
   Needs,
   PlanetStats,
   Policy,
-  Relation,
-  Resources,
   World,
 } from "@/types/world";
 
@@ -55,15 +58,6 @@ const POLICY_LABEL: Record<Policy, string> = {
   hoard: "Hoarding",
   rebel: "Rebelling",
 };
-const RELATION_STYLE: Record<
-  Relation,
-  { icon: string; cls: string; label: string }
-> = {
-  peace: { icon: "·", cls: "text-white/40", label: "at peace" },
-  trade: { icon: "🤝", cls: "text-emerald-300", label: "trading" },
-  rival: { icon: "😠", cls: "text-amber-300", label: "rivals" },
-  war: { icon: "⚔️", cls: "text-rose-300", label: "at war" },
-};
 const THINK_EVERY_MS = 75_000; // each nation's mind speaks up on its own this often
 const THINK_GAP_MS = 20_000; // but minds take turns, at most one every 20 seconds
 const NEWS_GAP_MS = 20_000; // the chronicle tells at most one piece of news every 20 seconds
@@ -72,7 +66,7 @@ const DEMO_GAPS = 0.4; // demo mode: the AI speaks 2.5x as often, to fit a 3-min
 type Entry = ChronicleEntry & { nation?: number };
 type Item = SimEvent & { nation: number }; // a queued event, pinned to the nation that tells it
 
-interface Hud {
+export interface Hud {
   year: number;
   stats: PlanetStats;
   needs: Needs;
@@ -651,175 +645,26 @@ export default function Game({
 
       {/* The planet and its nations */}
       <aside className="glass subtle-scrollbar absolute bottom-4 left-4 top-4 flex w-64 flex-col gap-4 overflow-y-auto p-4">
-        <div>
-          <p className="label">
-            Year {Math.floor(hud.year / SECONDS_PER_YEAR)} · God: {playerName}
-            {demo && (
-              <span className="ml-1.5 rounded bg-indigo-400/25 px-1.5 py-0.5 text-[10px] font-bold text-indigo-100">
-                DEMO {sim.pace}x
-              </span>
-            )}
-          </p>
-          <p className="truncate text-2xl font-semibold" title={planetName}>
-            {planetName}
-          </p>
-          <div className="mt-2 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-2">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-semibold text-sky-200/90">
-                {sim.type.name} world
-              </span>
-              <span className="text-[10px] uppercase tracking-wider text-amber-200/60">
-                {sim.type.hazard} risk
-              </span>
-            </div>
-            <p className="mt-1 text-[11px] leading-snug text-white/55">
-              {sim.type.blurb}
-            </p>
-            <p
-              className="mt-1.5 border-t border-white/10 pt-1.5 text-[11px] leading-snug text-white/45"
-              title="Between planets: armies from this kind of world beat yours"
-            >
-              <span className="font-semibold text-white/60">
-                Weak to {sim.type.weakTo}.
-              </span>{" "}
-              {sim.type.weakWhy}
-            </p>
-          </div>
-          <div className="my-2 flex gap-2">
-            <div
-              className="flex-1 rounded-lg bg-sky-400/15 px-2.5 py-1.5"
-              title="Resources produced per year, weighted by value. Peace and trade raise it."
-            >
-              <p className="text-[10px] uppercase tracking-wider text-sky-200/70">
-                Output / yr
-              </p>
-              <p className="text-xl font-bold tabular-nums">
-                {hud.output.toLocaleString()}
-              </p>
-            </div>
-            <div
-              className="flex-1 rounded-lg bg-white/5 px-2.5 py-1.5"
-              title="Military strength: one in five of your people can fight."
-            >
-              <p className="text-[10px] uppercase tracking-wider text-white/50">
-                Military
-              </p>
-              <p className="text-xl font-bold tabular-nums">{hud.military}</p>
-            </div>
-          </div>
-          <div
-            className="mb-2 rounded-lg bg-amber-300/10 px-2.5 py-1.5"
-            title="Your power. Nations earn it for you by worshipping; it grows faster when they love you. Spend it on miracles, prayers and interventions."
-          >
-            <p className="text-[10px] uppercase tracking-wider text-amber-200/70">
-              Devotion
-            </p>
-            <p className="text-xl font-bold tabular-nums">
-              ✨ {Math.floor(hud.god.devotion)}
-            </p>
-          </div>
-          <Goal hud={hud} />
-          <p className="text-sm text-white/60">
-            {stats.population.toLocaleString()} people · {stats.villages}{" "}
-            {stats.villages === 1 ? "village" : "villages"}
-          </p>
-        </div>
-        <div>
-          <p className="label mb-1.5">
-            Nations ({hud.nations.filter((n) => n.alive).length})
-            {hud.nations.some((n) => !n.alive) && (
-              <span className="normal-case text-white/40">
-                {" "}
-                · {hud.nations.filter((n) => !n.alive).length} fallen
-              </span>
-            )}
-          </p>
-          <ul className="space-y-1">
-            {hud.nations
-              .filter((n) => n.alive)
-              .map((n) => (
-                <li key={n.id}>
-                  <div
-                    className={`overflow-hidden rounded-lg transition ${sel === n.id ? "bg-white/15" : "hover:bg-white/5"}`}
-                  >
-                    <div className="flex items-center">
-                      <button
-                        onClick={() => {
-                          setSel(n.id);
-                          const face = sim.nationHome(n.id);
-                          if (face != null) setFocus({ face, key: Date.now() });
-                        }}
-                        className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left text-sm"
-                        title={`Focus ${cap(n.name)}`}
-                      >
-                      <span
-                        className="h-2.5 w-2.5 shrink-0 rounded-full"
-                        style={{ background: n.color }}
-                      />
-                      <span title={RACE[n.race].name}>{RACE[n.race].icon}</span>
-                      <span className="flex-1 truncate font-medium">
-                        {cap(n.name)}
-                      </span>
-                      <span className="hidden max-w-16 truncate text-xs text-amber-200/60 sm:block">
-                        {ERAS[n.era]}
-                      </span>
-                      <span className="text-xs tabular-nums text-white/50">
-                        {n.alive ? n.population : "fallen"}
-                      </span>
-                      </button>
-                      <button
-                        onClick={() =>
-                          setExpandedNation((current) =>
-                            current === n.id ? null : n.id,
-                          )
-                        }
-                        className="mr-1 grid h-7 w-7 shrink-0 place-items-center rounded-md text-xs text-white/45 transition hover:bg-white/10 hover:text-white/80"
-                        aria-expanded={expandedNation === n.id}
-                        aria-label={`${expandedNation === n.id ? "Hide" : "Show"} details for ${cap(n.name)}`}
-                      >
-                        <span
-                          className={`transition-transform ${expandedNation === n.id ? "rotate-180" : ""}`}
-                        >
-                          ▾
-                        </span>
-                      </button>
-                    </div>
-                    {expandedNation === n.id && (
-                      <div className="mx-2 mb-2 border-t border-white/10 px-1 pt-2 text-xs text-white/60">
-                        <div className="flex flex-wrap gap-x-3 gap-y-1">
-                          <span>{n.villages} {n.villages === 1 ? "village" : "villages"}</span>
-                          <span>{POLICY_LABEL[n.policy]}</span>
-                          {!!n.ships && <span>⚓ {n.ships} ships</span>}
-                          {n.crisis && (
-                            <span className="font-semibold uppercase text-rose-300">
-                              {n.crisis}
-                            </span>
-                          )}
-                        </div>
-                        <p className="mt-1">
-                          {n.leader.title} {n.leader.name}
-                        </p>
-                        {n.relations.length > 0 && (
-                          <div className="mt-1.5 flex flex-wrap gap-1">
-                            {n.relations.map((r) => (
-                              <span
-                                key={r.id}
-                                className={`rounded-md px-1.5 py-0.5 ${RELATION_STYLE[r.relation].cls}`}
-                                title={`${RELATION_STYLE[r.relation].label}, tension ${r.tension}`}
-                              >
-                                {RELATION_STYLE[r.relation].icon}{" "}
-                                {cap(hud.nations[r.id].name)}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </li>
-              ))}
-          </ul>
-        </div>
+        <PlanetSummary
+          hud={hud}
+          sim={sim}
+          playerName={playerName}
+          planetName={planetName}
+          demo={demo}
+        />
+        <NationList
+          nations={hud.nations}
+          selected={sel}
+          expanded={expandedNation}
+          onSelect={setSel}
+          onToggle={(id) =>
+            setExpandedNation((current) => (current === id ? null : id))
+          }
+          onFocus={(id) => {
+            const face = sim.nationHome(id);
+            if (face != null) setFocus({ face, key: Date.now() });
+          }}
+        />
         {demo && !hud.god.spacefaring && (
           <div className="mt-auto flex justify-center">
             <button
@@ -840,187 +685,34 @@ export default function Game({
         )}
       </aside>
 
-      <div
-        ref={resourcesPanelRef}
-        className="glass absolute left-[17.5rem] top-4 z-20 w-72 p-3"
-      >
-        <div className="mb-2 flex items-center justify-between">
-          <p className="label">Resources</p>
-        </div>
-        <div className="grid grid-cols-3 gap-2 text-center">
-          <Stock
-            align="left"
-            icon="🌾"
-            label="Food"
-            info="Harvested by well-fed people from the land around their homes."
-            value={stats.resources.food}
-          />
-          <Stock
-            icon="🪵"
-            label="Wood"
-            info="Cut from forests around towns."
-            value={stats.resources.wood}
-          />
-          <Stock
-            align="right"
-            icon="🪨"
-            label="Stone"
-            info="Quarried from rocky mountainsides."
-            value={stats.resources.stone}
-          />
-          <Stock
-            align="left"
-            icon="⚙️"
-            label="Metal"
-            info="Mined from ore in the mountains."
-            value={stats.resources.metal}
-          />
-          <Stock
-            icon="🪙"
-            label="Gold"
-            info="Mined at gold deposits."
-            value={stats.resources.gold}
-          />
-          <Stock
-            align="right"
-            icon="🌿"
-            label="Herbs"
-            info="Medicinal plants gathered in forests."
-            value={stats.resources.herbs}
-          />
-        </div>
-        <button
-          onClick={() => setUpgradesOpen((open) => !open)}
-          className={`mt-3 flex w-full items-center border-t border-white/10 pt-2 text-left text-xs font-semibold transition hover:text-white ${upgradesOpen ? "text-amber-100" : "text-sky-200/90"}`}
-          aria-expanded={upgradesOpen}
-          title="Spend resources on permanent upgrades"
-        >
-          <span className="flex items-center gap-2">
-            <span
-              className={`transition-transform ${upgradesOpen ? "rotate-90" : ""}`}
-            >
-              ›
-            </span>
-            <span>Upgrades</span>
-            {availableUpgrades > 0 && (
-              <span
-                className="upgrade-available-dot h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_8px_rgba(110,231,183,0.9)]"
-                aria-label={`${availableUpgrades} upgrades available`}
-              />
-            )}
-          </span>
-        </button>
-      </div>
-      {upgradesOpen && (
-        <div ref={upgradesMenuRef}>
-          <UpgradeMenu
-            sim={sim}
-            resources={stats.resources}
-            onUpgrade={() => setHud(readHud(sim))}
-          />
-        </div>
-      )}
+      <ResourcePanel
+        resources={stats.resources}
+        sim={sim}
+        open={upgradesOpen}
+        panelRef={resourcesPanelRef}
+        menuRef={upgradesMenuRef}
+        onToggle={() => setUpgradesOpen((open) => !open)}
+        onRefresh={() => setHud(readHud(sim))}
+        availableUpgrades={availableUpgrades}
+      />
 
-      {/* Pop-up: what is happening on the planet right now (disasters, weather, fate) */}
-      {hud.alert && hud.year - hud.alert.at < 7 && (
-        <div className="pointer-events-none absolute top-4 left-[17.5rem] right-[19.5rem] z-40 flex justify-center">
-          <div
-            key={hud.alert.at}
-            className="glass alert-pop pointer-events-auto flex max-w-lg items-center gap-3 px-5 py-3"
-          >
-            <span className="text-3xl leading-none">{hud.alert.icon}</span>
-            <div className="min-w-0">
-              <div className="text-base font-bold">{hud.alert.title}</div>
-              <div className="text-sm text-white/75">{hud.alert.text}</div>
-            </div>
-            <button
-              onClick={() =>
-                setFocus({ face: hud.alert!.face, key: Date.now() })
-              }
-              className="ml-2 shrink-0 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold transition hover:bg-white/20"
-            >
-              Show me
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Fate: the latest thing the heavens did, and the controls hint */}
-      <div className="pointer-events-none absolute bottom-4 left-[17.5rem] right-[19.5rem] flex flex-col items-center gap-2">
-        {hud.god.choice && (
-          <ChoiceCard
-            choice={hud.god.choice}
-            left={CHOICE_LIFE - (hud.year - hud.god.choice.at) / sim.pace}
-            devotion={hud.god.devotion}
-            names={hud.nations}
-            onPick={(yes) => {
-              sim.decide(yes);
-              setHud(readHud(sim));
-            }}
-            onShow={() =>
-              setFocus({ face: hud.god.choice!.face, key: Date.now() })
-            }
-          />
-        )}
-        {hud.god.prayers.slice(-3).map((p) => (
-          <div
-            key={p.id}
-            className="glass pointer-events-auto relative flex w-[30rem] max-w-full items-center gap-3 overflow-hidden px-4 py-2.5 text-sm"
-          >
-            <span className="text-xl">🙏</span>
-            <span className="flex-1">{cap(p.text)}</span>
-            <Countdown
-              left={PRAYER_LIFE - (hud.year - p.at) / sim.pace}
-              life={PRAYER_LIFE}
-            />
-            <button
-              disabled={hud.god.devotion < p.cost}
-              onClick={() => {
-                sim.answerPrayer(p.id, true);
-                setHud(readHud(sim));
-              }}
-              className="rounded-lg bg-amber-300/20 px-2.5 py-1 text-xs font-semibold transition hover:bg-amber-300/30 disabled:opacity-40"
-            >
-              Answer ✨{p.cost}
-            </button>
-            <button
-              onClick={() => {
-                sim.answerPrayer(p.id, false);
-                setHud(readHud(sim));
-              }}
-              className="rounded-lg bg-white/5 px-2.5 py-1 text-xs transition hover:bg-white/10"
-            >
-              Ignore
-            </button>
-          </div>
-        ))}
-        <div className="glass pointer-events-auto flex gap-1.5 p-1.5">
-          {MIRACLES.map((m) => {
-            const wait = Math.ceil(hud.god.ready[m.id] - hud.year);
-            const off = wait > 0 || hud.god.devotion < m.cost;
-            return (
-              <button
-                key={m.id}
-                onClick={() => setMiracle((x) => (x === m.id ? null : m.id))}
-                disabled={off && miracle !== m.id}
-                title={m.blurb}
-                className={`relative w-24 rounded-lg px-2 py-1.5 text-center transition disabled:opacity-40 ${miracle === m.id ? "bg-amber-300/30 ring-1 ring-amber-200" : "bg-white/5 hover:bg-white/10"}`}
-              >
-                <div className="text-lg leading-none">{m.icon}</div>
-                <div className="mt-0.5 text-[11px] font-semibold">{m.name}</div>
-                <div className="text-[10px] text-amber-200/80">
-                  {wait > 0 ? `ready in ${wait}s` : `✨ ${m.cost}`}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-        <p className="text-xs text-white/40">
-          {miracle
-            ? "Click the land to cast · Esc to cancel"
-            : "Drag to rotate · scroll to zoom · pick a miracle, then click the land"}
-        </p>
-      </div>
+      <GameOverlays
+        hud={hud}
+        pace={sim.pace}
+        miracle={miracle}
+        names={hud.nations}
+        onMiracle={(id) => setMiracle((current) => (current === id ? null : id))}
+        onDecide={(yes) => {
+          sim.decide(yes);
+          setHud(readHud(sim));
+        }}
+        onShowChoice={() => setFocus({ face: hud.god.choice!.face, key: Date.now() })}
+        onAnswerPrayer={(id, answer) => {
+          sim.answerPrayer(id, answer);
+          setHud(readHud(sim));
+        }}
+        onShowAlert={() => setFocus({ face: hud.alert!.face, key: Date.now() })}
+      />
 
       {talkTo != null && hud.nations[talkTo] && (
         <LeaderDialog
@@ -1035,8 +727,8 @@ export default function Game({
       )}
 
       {hover && hud.nations[hover.id] && (
-        <NationCard
-          n={hud.nations[hover.id]}
+        <NationHoverCard
+          nation={hud.nations[hover.id]}
           civ={civs[hover.id]}
           all={hud.nations}
           x={hover.x}
@@ -1045,304 +737,37 @@ export default function Game({
       )}
 
       {/* The chosen nation's mind */}
-      <aside className="glass subtle-scrollbar absolute bottom-4 right-4 top-4 flex w-72 flex-col p-4">
-        <div className="mb-3 space-y-2 border-b border-white/10 pb-3 text-sm">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-2">
-              <span
-                className="h-3 w-3 shrink-0 rounded-full"
-                style={{ background: me.color }}
-              />
-              <p className="truncate text-lg font-semibold">{cap(me.name)}</p>
-            </div>
-            <div ref={settingsRef} className="relative shrink-0">
-              <button
-                onClick={() => setSettingsOpen((open) => !open)}
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-sm text-white/65 transition hover:bg-white/10 hover:text-white"
-                title="Settings"
-                aria-label="Settings"
-                aria-expanded={settingsOpen}
-              >
-                ⚙️
-              </button>
-              {settingsOpen && (
-                <div className="absolute right-0 top-10 z-30 w-56 rounded-xl border border-white/10 bg-[#111827]/90 p-2 shadow-2xl backdrop-blur-xl">
-                  {onNewPlanet && (
-                    <button
-                      onClick={() => {
-                        setSettingsOpen(false);
-                        if (
-                          demo ||
-                          confirm("Start over on a new planet? This planet will be lost.")
-                        ) {
-                          onNewPlanet();
-                        }
-                      }}
-                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-white/70 transition hover:bg-white/10 hover:text-white"
-                    >
-                      <span>🪐</span>
-                      <span>{demo ? "Exit demo" : "New planet"}</span>
-                    </button>
-                  )}
-                  <button
-                    onClick={() => {
-                      setSettingsOpen(false);
-                      setGalaxy("join");
-                    }}
-                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-white/70 transition hover:bg-white/10 hover:text-white"
-                  >
-                    <span>🌌</span>
-                    <span>Galaxy</span>
-                  </button>
-                  <div className="mx-2 my-1 h-px bg-white/10" />
-                  <button
-                    onClick={() => setMuted((value) => !value)}
-                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-white/70 transition hover:bg-white/10 hover:text-white"
-                    aria-label={muted ? "Turn sound on" : "Mute"}
-                  >
-                    <span>{muted ? "🔇" : "🔊"}</span>
-                    <span>{muted ? "Sound off" : "Mute"}</span>
-                  </button>
-                  <div
-                    className={`mx-2 mt-1 flex items-center gap-2 rounded-lg px-1 py-2 text-xs ${
-                      link.enabled && link.members ? "text-emerald-200" : "text-white/45"
-                    }`}
-                    title={
-                      !link.enabled
-                        ? "Galaxy offline"
-                        : link.galaxy
-                          ? `In galaxy ${link.galaxy}: ${link.members}/5 gods`
-                          : link.members
-                            ? `${link.members} gods online`
-                            : "Not in a galaxy"
-                    }
-                  >
-                    <span
-                      className={`ml-0.5 h-2 w-2 rounded-full ${
-                        link.enabled && link.members
-                          ? "bg-emerald-400"
-                          : link.enabled
-                            ? "bg-white/50"
-                            : "bg-white/30"
-                      }`}
-                    />
-                    <span>
-                      {!link.enabled
-                        ? "Offline"
-                        : link.galaxy
-                          ? `${link.members}/5 gods online`
-                          : link.members
-                            ? `${link.members} gods online`
-                            : "Solo"}
-                    </span>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-          <button
-            onClick={() => openLeader(sel)}
-            disabled={!me.alive}
-            className="flex w-full items-center gap-3 rounded-xl bg-white/5 p-2 text-left transition hover:bg-white/10 disabled:opacity-40"
-            title="Hold an audience with their leader"
-          >
-            <span className="shrink-0 overflow-hidden rounded-lg">
-              <Portrait
-                race={me.race}
-                seed={me.leader.seed}
-                color={me.color}
-                mood={moods[sel]}
-                size={52}
-              />
-            </span>
-            <span className="min-w-0">
-              <span className="block truncate text-sm font-semibold">
-                {me.leader.title} {me.leader.name}
-              </span>
-              <span className="block text-xs text-white/55">
-                {RACE[me.race].icon} {RACE[me.race].name} · {ERAS[me.era]}
-              </span>
-              <span className="block text-xs text-sky-300">
-                🗣️ Talk to the leader
-              </span>
-            </span>
-          </button>
-          <NeedBars needs={me.needs} crisis={me.crisis} love={me.love} />
-          {civ ? (
-            <>
-              <div className="hud-meta-row">
-                <span className="hud-meta-label">Crisis</span>
-                <span
-                  className={`hud-meta-value ${me.crisis ? "!text-rose-300" : "text-white/45"}`}
-                >
-                  {me.crisis ? cap(me.crisis) : "None"}
-                </span>
-              </div>
-              <div className="hud-meta-row">
-                <span className="hud-meta-label">Focus</span>
-                <span
-                  className={`hud-meta-value ${me.policy === "rebel" ? "text-rose-300" : ""}`}
-                >
-                  {POLICY_LABEL[me.policy]}
-                </span>
-                {reasons[sel] && (
-                  <span className="hud-meta-note">{reasons[sel]}</span>
-                )}
-              </div>
-              <div className="hud-meta-row">
-                <span className="hud-meta-label">Faith</span>
-                <span className="hud-meta-value">{civ.religion.name}</span>
-              </div>
-              <div className="hud-meta-row">
-                <span className="hud-meta-label">Their belief</span>
-                <span className="hud-meta-note text-white/70">
-                  They call you <b>{civ.religion.godName}</b>.{" "}
-                  {civ.religion.belief}
-                </span>
-              </div>
-              <div className="hud-meta-row">
-                <span className="hud-meta-label">Attitude</span>
-                <span
-                  className={`hud-meta-value ${civ.attitude === "hostile" || civ.attitude === "resentful" ? "text-rose-300" : ""}`}
-                >
-                  {cap(civ.attitude)}
-                </span>
-              </div>
-            </>
-          ) : (
-            <p className="text-white/50">
-              {me.alive ? "They do not know you yet." : "This nation is gone."}
-            </p>
-          )}
-        </div>
-
-        {/* Nation chat is temporarily hidden while the galaxy controls take the spotlight. */}
-        <div className="mb-4 border-b border-white/10 pb-4">
-          <p className="label mb-2">Galaxy</p>
-          <div className="grid grid-cols-3 gap-2">
-            <button
-              disabled={!link.galaxy || !hud.god.spacefaring}
-              onClick={() => setGalaxy("invade")}
-              className="group rounded-lg border border-rose-300/15 bg-rose-400/10 px-3 py-3 text-left transition hover:border-rose-300/30 hover:bg-rose-400/20 disabled:cursor-not-allowed disabled:border-white/5 disabled:bg-white/[0.03] disabled:text-white/30"
-              title={
-                !link.galaxy
-                  ? "Join a galaxy to invade"
-                  : !hud.god.spacefaring
-                    ? "Reach the Space Age to invade"
-                    : "Choose a planet to invade"
-              }
-            >
-              <span className="block text-lg">⚔️</span>
-              <span className="mt-1 block text-sm font-semibold">Invade</span>
-              <span className="block text-[10px] text-current opacity-60">
-                {!link.galaxy
-                  ? "Join a galaxy first"
-                  : !hud.god.spacefaring
-                    ? "Space Age required"
-                    : "Launch an attack"}
-              </span>
-            </button>
-            <button
-              disabled={!link.galaxy}
-              onClick={() => setGalaxy("market")}
-              className="group rounded-lg border border-amber-300/15 bg-amber-400/10 px-3 py-3 text-left transition hover:border-amber-300/30 hover:bg-amber-400/20 disabled:cursor-not-allowed disabled:border-white/5 disabled:bg-white/[0.03] disabled:text-white/30"
-              title={
-                !link.galaxy
-                  ? "Join a galaxy to use the market"
-                  : "Open the galaxy market"
-              }
-            >
-              <span className="block text-lg">⚖️</span>
-              <span className="mt-1 block text-sm font-semibold">Market</span>
-              <span className="block text-[10px] text-current opacity-60">
-                {!link.galaxy ? "Join a galaxy first" : "Trade resources"}
-              </span>
-            </button>
-            <button
-              disabled={!link.galaxy}
-              onClick={() => setGalaxy("offers")}
-              className="group rounded-lg border border-sky-300/15 bg-sky-400/10 px-3 py-3 text-left transition hover:border-sky-300/30 hover:bg-sky-400/20 disabled:cursor-not-allowed disabled:border-white/5 disabled:bg-white/[0.03] disabled:text-white/30"
-              title={!link.galaxy ? "Join a galaxy to trade with other gods" : "Offer a swap to another god"}
-            >
-              <span className="block text-lg">🤝</span>
-              <span className="mt-1 block text-sm font-semibold">Offers</span>
-              <span className="block text-[10px] text-current opacity-60">
-                {!link.galaxy ? "Join a galaxy first" : "Swap with a god"}
-              </span>
-            </button>
-          </div>
-          <button
-            onClick={() => setGalaxy("join")}
-            className={`mt-2 w-full rounded-lg px-3 py-2 text-sm font-semibold transition ${
-              link.galaxy
-                ? "bg-indigo-400/15 text-indigo-100 hover:bg-indigo-400/25"
-                : "bg-indigo-400/30 text-white hover:bg-indigo-400/40"
-            }`}
-          >
-            {link.galaxy
-              ? `Galaxy ${link.galaxy} · Manage`
-              : "🌌 Join a galaxy"}
-          </button>
-        </div>
-
-        <div className="mb-2 flex items-center justify-between">
-          <p className="label">Chronicle</p>
-          {busy === "narrating" && (
-            <span className="text-[10px] uppercase tracking-wider text-amber-200/60 animate-pulse">
-              Writing…
-            </span>
-          )}
-        </div>
-        <ol className="subtle-scrollbar flex-1 space-y-2 overflow-y-auto pr-1">
-          {[...chronicle].reverse().map((c, i) => (
-            <li key={chronicle.length - i} className="chronicle-entry">
-              <div className="chronicle-year">
-                <span>Year</span>
-                <strong>{Math.floor(c.year)}</strong>
-              </div>
-              <div className="min-w-0 flex-1 text-[13px] leading-snug text-white/75">
-                {c.nation != null && (
-                  <span
-                    className="mr-1.5 inline-block h-2 w-2 align-middle rounded-full"
-                    style={{ background: sim.nations[c.nation].color }}
-                    title={sim.nations[c.nation].name}
-                  />
-                )}
-                {c.text}
-              </div>
-            </li>
-          ))}
-          {!chronicle.length && (
-            <li className="py-3 text-xs text-white/40">
-              The story of this world will appear here.
-            </li>
-          )}
-        </ol>
-      </aside>
+      <GameRightPanel
+        nation={me}
+        civ={civ}
+        mood={moods[sel]}
+        reason={reasons[sel]}
+        settingsOpen={settingsOpen}
+        settingsRef={settingsRef}
+        onSettingsToggle={() => setSettingsOpen((value) => !value)}
+        onSettingsClose={() => setSettingsOpen(false)}
+        demo={demo}
+        onNewPlanet={onNewPlanet}
+        onGalaxy={() => {
+          setSettingsOpen(false);
+          setGalaxy("join");
+        }}
+        muted={muted}
+        onMute={() => setMuted((value) => !value)}
+        link={link}
+        spacefaring={hud.god.spacefaring}
+        onOpenGalaxy={setGalaxy}
+        onOpenLeader={() => openLeader(sel)}
+        chronicle={chronicle}
+        busy={busy}
+        nationColors={sim.nations}
+      />
       {hud.god.outcome && !seenOutcome && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="glass w-[26rem] p-6 text-center">
-            <div className="text-5xl">{hud.god.outcome.won ? "🏆" : "🌑"}</div>
-            <h2 className="mt-3 text-2xl font-bold">{hud.god.outcome.title}</h2>
-            <p className="mt-2 text-sm text-white/75">{hud.god.outcome.text}</p>
-            <div className="mt-5 flex justify-center gap-2">
-              <button
-                onClick={() => setSeenOutcome(true)}
-                className="rounded-lg bg-white/10 px-4 py-2 text-sm font-semibold hover:bg-white/20"
-              >
-                Keep watching
-              </button>
-              <button
-                onClick={() =>
-                  onNewPlanet ? onNewPlanet() : location.reload()
-                }
-                className="rounded-lg bg-sky-400/30 px-4 py-2 text-sm font-semibold hover:bg-sky-400/40"
-              >
-                New planet
-              </button>
-            </div>
-          </div>
-        </div>
+        <OutcomeDialog
+          outcome={hud.god.outcome}
+          onKeepWatching={() => setSeenOutcome(true)}
+          onNewPlanet={onNewPlanet}
+        />
       )}
       {/* The galaxy (multiplayer): always syncing; join or leave any time, trade and invade from the Space Age */}
       <Galaxy
@@ -1444,363 +869,4 @@ function offline(
     civ: { ...world.civ, attitude: r.attitude },
     entry: { year: world.year, kind, text: r.text },
   };
-}
-
-function UpgradeMenu({
-  sim,
-  resources,
-  onUpgrade,
-}: {
-  sim: PlanetSim;
-  resources: Resources;
-  onUpgrade: () => void;
-}) {
-  const resourceIcons: Record<keyof Resources, string> = {
-    food: "🌾",
-    wood: "🪵",
-    stone: "🪨",
-    metal: "⚙️",
-    gold: "🪙",
-    herbs: "🌿",
-  };
-  return (
-    <section
-      className="glass absolute left-[17.5rem] top-[14.5rem] z-30 w-96 max-w-[calc(100vw-20rem)] p-4 shadow-2xl"
-      aria-label="World upgrades"
-    >
-      <div className="mb-3 flex items-start justify-between border-b border-white/10 pb-3">
-        <div>
-          <p className="text-lg font-bold">World upgrades</p>
-          <p className="text-xs text-white/55">
-            Invest your stockpile to shape the planet’s future.
-          </p>
-        </div>
-        <span className="rounded-full bg-amber-300/15 px-2 py-1 text-[10px] font-semibold text-amber-200">
-          PERMANENT
-        </span>
-      </div>
-      <div className="space-y-2">
-        {UPGRADES.map((upgrade) => {
-          const level = sim.upgrades[upgrade.id];
-          const cost = upgrade.costs[level];
-          const affordable =
-            !!cost &&
-            Object.entries(cost).every(
-              ([resource, amount]) =>
-                resources[resource as keyof Resources] >= amount,
-            );
-          return (
-            <div
-              key={upgrade.id}
-              className={`rounded-xl border p-3 transition ${affordable ? "border-emerald-300/40 bg-emerald-300/10" : "border-white/10 bg-white/5"}`}
-            >
-              <div className="flex items-start gap-2">
-                <span className="text-xl">{upgrade.icon}</span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="font-semibold">{upgrade.name}</p>
-                    <span className="text-[11px] text-white/50">
-                      Lv {level}/{upgrade.max}
-                    </span>
-                  </div>
-                  <p className="mt-0.5 text-xs text-white/60">
-                    {upgrade.description}
-                  </p>
-                  {cost ? (
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {Object.entries(cost).map(([resource, amount]) => (
-                        <span
-                          key={resource}
-                          className={`rounded bg-black/20 px-1.5 py-0.5 text-[11px] tabular-nums ${resources[resource as keyof Resources] >= amount ? "text-emerald-200" : "text-rose-300"}`}
-                        >
-                          {resourceIcons[resource as keyof Resources]} {amount}
-                        </span>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-amber-200/70">
-                      Fully upgraded
-                    </p>
-                  )}
-                </div>
-                {cost && (
-                  <button
-                    disabled={!affordable}
-                    onClick={() => {
-                      if (sim.purchaseUpgrade(upgrade.id)) onUpgrade();
-                    }}
-                    className="shrink-0 rounded-lg bg-emerald-300/20 px-2.5 py-1.5 text-xs font-bold text-emerald-100 transition hover:bg-emerald-300/35 disabled:cursor-not-allowed disabled:opacity-35"
-                  >
-                    Upgrade
-                  </button>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
-// The card that follows the mouse when hovering over a nation on the globe.
-function NationCard({
-  n,
-  civ,
-  all,
-  x,
-  y,
-}: {
-  n: NationInfo;
-  civ: Civ | null;
-  all: NationInfo[];
-  x: number;
-  y: number;
-}) {
-  const left = Math.min(x + 16, window.innerWidth - 260);
-  const top = Math.min(y + 16, window.innerHeight - 260);
-  return (
-    <div
-      className="glass pointer-events-none fixed z-10 w-60 space-y-2 p-3 text-sm"
-      style={{ left, top }}
-    >
-      <div className="flex items-center gap-2">
-        <span
-          className="h-3 w-3 rounded-full"
-          style={{ background: n.color }}
-        />
-        <p className="font-semibold">{cap(n.name)}</p>
-        {n.crisis && (
-          <span className="ml-auto text-xs font-semibold uppercase text-rose-300">
-            {n.crisis}
-          </span>
-        )}
-      </div>
-      <p className="text-xs text-white/60">
-        {RACE[n.race].icon} {RACE[n.race].name} · {ERAS[n.era]} · led by{" "}
-        {n.leader.title} {n.leader.name}
-      </p>
-      {civ && (
-        <p className="text-xs text-white/60">
-          {cap(civ.demonym)} · worship {civ.religion.godName} (
-          {civ.religion.name}) · feel {civ.attitude}
-        </p>
-      )}
-      <p className="text-xs text-white/70">
-        {n.alive
-          ? `${n.population} people · ${n.villages} ${n.villages === 1 ? "village" : "villages"} · ${POLICY_LABEL[n.policy].toLowerCase()}`
-          : "Fallen"}
-      </p>
-      <NeedBars needs={n.needs} crisis={null} />
-      {n.relations.length > 0 && (
-        <div className="flex flex-wrap gap-x-2 text-xs">
-          {n.relations.map((r) => (
-            <span key={r.id} className={RELATION_STYLE[r.relation].cls}>
-              {RELATION_STYLE[r.relation].icon}{" "}
-              {RELATION_STYLE[r.relation].label} with {cap(all[r.id].name)}
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// One resource tile; hovering shows what it is and where it comes from.
-// The tooltip lines up with the tile's outer edge in the side columns, so it never runs off the panel.
-const TIP_ALIGN = {
-  left: "left-0",
-  center: "left-1/2 -translate-x-1/2",
-  right: "right-0",
-};
-function Stock({
-  icon,
-  label,
-  info,
-  value,
-  align = "center",
-}: {
-  icon: string;
-  label: string;
-  info: string;
-  value: number;
-  align?: keyof typeof TIP_ALIGN;
-}) {
-  return (
-    <div
-      className="group relative cursor-help rounded-lg bg-white/5 py-1.5"
-      aria-label={`${label}: ${info}`}
-    >
-      <div>{icon}</div>
-      <div className="text-sm font-semibold tabular-nums">
-        {value.toLocaleString()}
-      </div>
-      <div
-        className={`pointer-events-none absolute top-full z-50 mt-1.5 w-44 ${TIP_ALIGN[align]} rounded-lg border border-white/15 bg-[#0d1424] px-2.5 py-2 text-left opacity-0 shadow-xl transition-opacity group-hover:opacity-100`}
-      >
-        <p className="text-xs font-semibold">
-          {icon} {label}
-        </p>
-        <p className="mt-0.5 text-[11px] leading-snug text-white/70">{info}</p>
-      </div>
-    </div>
-  );
-}
-
-function NeedBars({
-  needs,
-  crisis,
-  love,
-}: {
-  needs: Needs;
-  crisis: Crisis | null;
-  love?: number;
-}) {
-  const bars: [string, number][] = [
-    ["Food", needs.food],
-    ["Stability", needs.stability],
-    ...(love != null ? [["Love for you", love] as [string, number]] : []),
-  ];
-  return (
-    <div className="mt-1 mb-4 space-y-2.5 border-t border-white/10 pt-2">
-      {bars.map(([name, v]) => (
-        <div key={name}>
-          <div className="mb-1 flex items-baseline justify-between">
-            <span className="hud-meta-label text-white/65">{name}</span>
-            <span className="text-[11px] font-semibold tabular-nums text-white/65">
-              {Math.round(v)}
-            </span>
-          </div>
-          <div className="h-1 rounded-full bg-white/10">
-            <div
-              className={`h-full rounded-full transition-all ${v < 25 ? "bg-rose-400" : "bg-sky-300"}`}
-              style={{ width: `${Math.max(0, Math.min(100, v))}%` }}
-            />
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// The goal, and how close the god is to it.
-function Goal({ hud }: { hud: Hud }) {
-  const mine = hud.nations[0];
-  const year = Math.floor(hud.year / SECONDS_PER_YEAR);
-  const love = Math.round(hud.god.avgLove);
-  return (
-    <div
-      className="mb-2 rounded-lg border border-white/10 px-2.5 py-2 text-xs"
-      title="Lose if your people fall, or if every nation comes to hate you."
-    >
-      <p className="text-[10px] uppercase tracking-wider text-white/50">Goal</p>
-      <p className="text-white/80">
-        Keep {mine ? cap(mine.name) : "your people"} alive to Year {GOAL_YEAR},
-        loved by the nations.
-      </p>
-      <div className="mt-1.5 flex justify-between text-white/60">
-        <span>
-          Year {Math.min(year, GOAL_YEAR)}/{GOAL_YEAR}
-        </span>
-        <span
-          className={
-            love >= 50
-              ? "text-emerald-300"
-              : love < 25
-                ? "text-rose-300"
-                : "text-amber-200"
-          }
-        >
-          Love {love}/50
-        </span>
-      </div>
-      <div className="mt-1 h-1 overflow-hidden rounded-full bg-white/10">
-        <div
-          className="h-full bg-sky-300"
-          style={{ width: `${Math.min(100, (year / GOAL_YEAR) * 100)}%` }}
-        />
-      </div>
-    </div>
-  );
-}
-
-// A disaster, war or revolution has begun: step in (for devotion) or let fate decide.
-// Seconds left to answer, as a number plus a bar along the card's bottom edge that drains and turns red near the end.
-function Countdown({ left, life }: { left: number; life: number }) {
-  const s = Math.max(0, Math.ceil(left)),
-    urgent = s <= 5;
-  return (
-    <>
-      <span
-        className={`w-8 text-right text-xs tabular-nums ${urgent ? "font-bold text-red-400" : "text-white/50"}`}
-        title="Seconds left to decide"
-      >
-        {s}s
-      </span>
-      <span className="absolute inset-x-0 bottom-0 h-0.5 bg-white/5">
-        <span
-          className={`block h-full transition-[width] duration-300 ease-linear ${urgent ? "bg-red-400" : "bg-amber-300/70"}`}
-          style={{ width: `${Math.max(0, Math.min(1, left / life)) * 100}%` }}
-        />
-      </span>
-    </>
-  );
-}
-
-function ChoiceCard({
-  choice,
-  left,
-  devotion,
-  names,
-  onPick,
-  onShow,
-}: {
-  choice: NonNullable<Hud["god"]["choice"]>;
-  left: number;
-  devotion: number;
-  names: NationInfo[];
-  onPick: (intervene: boolean) => void;
-  onShow: () => void;
-}) {
-  const what = {
-    disaster: "Turn it aside",
-    war: "Force a peace",
-    revolution: "Calm the people",
-  }[choice.kind];
-  const who = choice.nations
-    .map((n) => names[n]?.name)
-    .filter(Boolean)
-    .map((n) => cap(n!))
-    .join(" and ");
-  return (
-    <div className="glass alert-pop pointer-events-auto relative w-[30rem] max-w-full overflow-hidden px-4 py-3">
-      <div className="flex items-center gap-2">
-        <span className="text-base font-bold">{choice.title}</span>
-        <span className="text-xs text-white/50">{who}</span>
-        <button
-          onClick={onShow}
-          className="ml-auto text-xs text-sky-300 hover:underline"
-        >
-          Show me
-        </button>
-        <Countdown left={left} life={CHOICE_LIFE} />
-      </div>
-      <p className="mt-0.5 text-sm text-white/75">{choice.text}</p>
-      <div className="mt-2 flex gap-2">
-        <button
-          disabled={devotion < choice.cost}
-          onClick={() => onPick(true)}
-          className="flex-1 rounded-lg bg-amber-300/20 px-3 py-1.5 text-sm font-semibold transition hover:bg-amber-300/30 disabled:opacity-40"
-        >
-          {what} ✨{choice.cost}
-        </button>
-        <button
-          onClick={() => onPick(false)}
-          className="flex-1 rounded-lg bg-white/5 px-3 py-1.5 text-sm transition hover:bg-white/10"
-        >
-          Let fate decide
-        </button>
-      </div>
-    </div>
-  );
 }
