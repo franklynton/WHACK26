@@ -7,13 +7,6 @@ import { RACES, type RaceId } from "@/sim/races";
 import { PLANET_TYPES } from "@/sim/planet";
 import { CODE_RULE, GALAXY_MAX, cleanCode, joinError, setWantedGalaxy, typeCode } from "@/lib/galaxyCode";
 
-const STEPS = [
-  { icon: "🌍", title: "Get a planet", text: "Every planet is different. Some are rich in wood, others in metal, gold or rare medicinal herbs." },
-  { icon: "🧍", title: "Raise a people", text: "Tiny people wander, farm and build villages. Once they settle, they become aware of you, their god." },
-  { icon: "🎲", title: "Fate rules their world", text: "Rain, drought, miracles, fire and meteors fall at random. Your people will think you sent them." },
-  { icon: "💬", title: "Talk to them", text: "Your people share one mind, powered by AI. They pray, plead and argue with you. Answer their prayers, work miracles, or smite them." },
-];
-
 const NAME_KEY = "arda-player-name";
 const PLANET_KEY = "arda-planet-name";
 
@@ -56,8 +49,10 @@ export default function Landing({ onStart }: { onStart: (playerName: string, pla
 
   const start = (e: React.FormEvent) => {
     e.preventDefault();
-    const n = name.trim() || "Nameless One";
-    const pl = planet.trim() || "Arda";
+    const n = name.trim();
+    const pl = planet.trim();
+    if (!n) return setNameError("Your name MUST have a value.");
+    if (!pl) return setNameError("Your planet name MUST have a value.");
     if (n.length < 4) return setNameError("Your name must be at least 4 characters.");
     if (pl.length < 4) return setNameError("Your planet name must be at least 4 characters.");
     setNameError("");
@@ -83,7 +78,7 @@ export default function Landing({ onStart }: { onStart: (playerName: string, pla
         </div>
 
         <div className="relative mx-auto mt-4 w-full text-left">
-        <form onSubmit={start} className="glass mx-auto flex w-full max-w-[520px] flex-col gap-3 p-4 text-left">
+        <form onSubmit={start} noValidate className="glass mx-auto flex w-full max-w-[520px] flex-col gap-3 p-4 text-left">
           <label htmlFor="name" className="label">
             Your name
           </label>
@@ -96,7 +91,8 @@ export default function Landing({ onStart }: { onStart: (playerName: string, pla
             }}
             minLength={4}
             maxLength={24}
-            aria-invalid={!!nameError && name.trim().length < 4}
+            required
+            aria-invalid={!!nameError && name.trim().length === 0}
             placeholder="What do mortals call you?"
             className="rounded-lg bg-white/10 px-4 py-2.5 outline-none placeholder:text-white/30 focus:bg-white/15"
           />
@@ -112,7 +108,8 @@ export default function Landing({ onStart }: { onStart: (playerName: string, pla
             }}
             minLength={4}
             maxLength={24}
-            aria-invalid={!!nameError && planet.trim().length < 4}
+            required
+            aria-invalid={!!nameError && planet.trim().length === 0}
             placeholder="Name your world"
             className="rounded-lg bg-white/10 px-4 py-2.5 outline-none placeholder:text-white/30 focus:bg-white/15"
           />
@@ -199,15 +196,6 @@ export default function Landing({ onStart }: { onStart: (playerName: string, pla
           <button className="mt-1 rounded-lg bg-sky-400 px-4 py-2.5 font-semibold text-slate-950 transition hover:bg-sky-300">{demo ? "Start the demo" : "Create your planet"}</button>
         </form>
 
-        <aside className="mx-auto mt-5 grid w-full max-w-[144px] grid-cols-1 gap-2 lg:absolute lg:left-[calc(50%+274px)] lg:top-0 lg:mt-0 lg:max-w-none lg:w-36">
-          {STEPS.map((s) => (
-            <div key={s.title} className="glass aspect-square p-3">
-              <div className="text-3xl">{s.icon}</div>
-              <h2 className="mt-2 font-semibold">{s.title}</h2>
-              <p className="mt-1 text-[11px] leading-4 text-white/60">{s.text}</p>
-            </div>
-          ))}
-        </aside>
         </div>
       </section>
     </main>
