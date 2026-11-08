@@ -3,6 +3,7 @@ import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import Landing from "@/components/Landing";
 import { clearGame, loadGame, setDemo, type Save } from "@/lib/save";
+import { forgetPlanet } from "@/lib/galaxyCode";
 import type { RaceId } from "@/sim/races";
 
 // The game uses WebGL and window APIs, so it only renders in the browser.
@@ -25,11 +26,13 @@ export default function Home() {
   if (!checked) return <main className="starfield min-h-dvh" />;
   const newPlanet = () => {
     clearGame();
+    forgetPlanet();
     setPlayer(null);
   };
   // Leaving the demo throws the demo away and goes back to your real planet, if you have one.
   const exitDemo = () => {
     clearGame(true);
+    forgetPlanet(true);
     setDemo(false);
     setPlayer(fromSave(loadGame(false)));
   };
