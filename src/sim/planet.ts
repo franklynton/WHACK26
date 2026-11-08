@@ -119,6 +119,7 @@ export const MIRACLES: { id: MiracleId; name: string; icon: string; cost: number
 export type Prayer = { id: number; nation: number; kind: "rain" | "harvest" | "peace" | "sign"; other?: number; text: string; cost: number; at: number };
 export type Choice = { id: number; kind: "disaster" | "war" | "revolution"; title: string; text: string; face: number; nations: number[]; cost: number; at: number };
 export const GOAL_YEAR = 30; // calendar year the goal is judged at
+const CHOICE_GAP = 45; // seconds between choice cards (wars, revolutions, disasters)
 export const PRAYER_LIFE = 15, CHOICE_LIFE = 15; // seconds before an unanswered prayer or choice lapses
 const DISASTER_ICONS = new Set(["🌊", "☄️", "🌋", "⛈️", "🫨", "☀️", "☠️"]);
 // A drought's heat haze over `face`, for the globe to draw while it lasts.
@@ -1150,8 +1151,9 @@ export class PlanetSim {
     // Prayers: now and then a nation asks for something it needs.
     this.nextPrayer -= dt;
     if (this.nextPrayer <= 0) {
-      this.nextPrayer = 30 + Math.random() * 20;
-      const askers = this.nations.filter((nt) => this.aware(nt) && !this.prayers.some((p) => p.nation === nt.id));
+      // About one prayer a minute of real time, one at a time, and never on top of a choice card.
+      this.nextPrayer = (60 + Math.random() * 40) * this.pace;
+      const askers = this.prayers.length || this.choice ? [] : this.nations.filter((nt) => this.aware(nt));
       const nt = askers[Math.floor(Math.random() * askers.length)];
       if (nt) this.prayers.push(this.makePrayer(nt));
     }
@@ -1274,8 +1276,12 @@ export class PlanetSim {
   }
 
   // When something big starts, the god may step in (for devotion) or let fate decide.
+  private lastChoiceAt = -1e9;
   private offer(kind: Choice["kind"], title: string, text: string, face: number, nations: number[]) {
     if (this.choice || this.outcome || !nations.length) return;
+    // At most one choice card every 45 real seconds; anything in between just happens (it's in the chronicle).
+    if (this.year - this.lastChoiceAt < CHOICE_GAP * this.pace) return;
+    this.lastChoiceAt = this.year;
     const cost = kind === "war" ? 35 : kind === "revolution" ? 25 : 30;
     this.choice = { id: this.nextId++, kind, title, text, face, nations, cost, at: this.year };
   }
