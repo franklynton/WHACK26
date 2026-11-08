@@ -7,6 +7,7 @@ import { IncomingOffers, OffersTab, useTradeOffers } from "./TradeOffers";
 import { CODE_RULE, GALAXY_MAX, cleanCode, joinError, setWantedGalaxy, typeCode, wantedGalaxy } from "@/lib/galaxyCode";
 import { GalaxyMarket } from "./GalaxyMarket";
 import { GalaxyInvasion } from "./GalaxyInvasion";
+import { IncomingFleets, useFleets } from "./InvasionFleets";
 
 // Multiplayer: every planet syncs a snapshot to Supabase (through /api/galaxy) every few seconds.
 // Galaxies are temporary rooms of up to 5 gods, named by a code: the first god to use a code creates it,
@@ -29,7 +30,12 @@ interface Action {
   source_world_id: string;
   target_world_id: string;
   action_type: "trade" | "invasion";
-  payload: { resource?: keyof Resources; amount?: number; won?: boolean };
+  payload: {
+    resource?: keyof Resources; amount?: number; won?: boolean;
+    // Fleets (migration 011): how the invasion ended, and what each side lost or gained
+    result?: "won" | "repelled" | "tribute" | "recalled"; fleet?: number; attacker_lost?: number; defender_lost?: number;
+    loot?: Partial<Resources>; shields?: boolean;
+  };
   message: string;
 }
 
@@ -98,7 +104,11 @@ export default function Galaxy({
       const mine = a.source_world_id === ids.world;
       const other = names.current.get(mine ? a.target_world_id : a.source_world_id) ?? "another planet";
       if (a.action_type === "trade" && a.payload.resource && a.payload.amount) sim.galaxyTrade(a.payload.resource, mine ? -a.payload.amount : a.payload.amount, other);
-      if (a.action_type === "invasion") {
+      if (a.action_type === "invasion" && a.payload.result) {
+        const p = a.payload;
+        if (mine) sim.fleetHome(other, p.result!, p.fleet ?? 0, p.attacker_lost ?? 0, p.loot ?? {});
+        else if (p.result === "won" || p.result === "repelled") sim.raidedFromSpace(other, p.result === "won", p.defender_lost ?? 0, p.loot ?? {}, !!p.shields);
+      } else if (a.action_type === "invasion") {
         if (a.payload.won) {
           if (mine) sim.galaxyLoot(20, other);
           else sim.invadedFromSpace(other, 20);
@@ -212,7 +222,7 @@ export default function Galaxy({
       try {
         const { res, data } = await post({
           action: "sync", ownerName, planetName, planetType: s.planetType,
-          population: s.population, villages: s.villages, output: Math.round(sim.output), military: sim.military(),
+          population: s.population, villages: s.villages, output: Math.round(sim.output), military: sim.military(), defence: sim.defenceStrength(),
           resources: snap.sent, delta: deltas.current ? snap.delta : null,
           positionX: (hash & 0xffff) / 0xffff, positionY: ((hash >>> 16) & 0xffff) / 0xffff,
         });
@@ -241,6 +251,8 @@ export default function Galaxy({
 
   // Trade offers with the other gods in our galaxy (TradeOffers.tsx).
   const offers = useTradeOffers({ worldId: ids.world, post, sync, sim, active: !!(enabled && rooms && galaxy) });
+  // Invasion fleets in flight, to and from us (InvasionFleets.tsx).
+  const fleets = useFleets({ worldId: ids.world, post, sync, sim, active: !!(enabled && rooms && galaxy), onSettled: load });
 
   useEffect(() => {
     wanted.current = wantedGalaxy(); // from the landing page, a shared link, or last time
@@ -330,9 +342,15 @@ export default function Galaxy({
   };
 
 
-  const invade = async (target: string): Promise<string> => {
+  const invade = async (target: string, share = 0.5): Promise<string> => {
     if (alone) {
       const text = "You're playing alone. Join a galaxy to invade.";
+      setMessage(text);
+      return text;
+    }
+    // Migration 011: a real fleet that flies for 30 seconds. Before it's run, the old instant invasion.
+    const text = fleets.ready ? await fleets.launch(target, share) : null;
+    if (text != null) {
       setMessage(text);
       return text;
     }
@@ -349,7 +367,12 @@ export default function Galaxy({
   const alone = rooms ? !galaxy : aloneLocal;
   const shown = alone ? [] : planets;
   // Offers sent to us show over the game even while this panel is closed.
-  const incoming = <IncomingOffers sim={sim} offers={offers} />;
+  const incoming = (
+    <>
+      <IncomingOffers sim={sim} offers={offers} />
+      <IncomingFleets sim={sim} fleets={fleets} />
+    </>
+  );
   if (!open) return incoming;
   const members = planets.length + 1;
 
@@ -525,6 +548,8 @@ export default function Galaxy({
             planets={shown}
             spacefaring={spacefaring}
             onInvade={invade}
+            military={sim.soldiers()}
+            outgoing={fleets.ready ? fleets.outgoing : []}
           />
         )}
       </div>

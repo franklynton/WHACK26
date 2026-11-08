@@ -49,6 +49,7 @@ const RESOURCE_STYLE: Record<keyof Resources, { button: string; active: string; 
   herbs: { button: "border-fuchsia-300/20 bg-fuchsia-400/10 text-fuchsia-100", active: "bg-fuchsia-400/25 ring-fuchsia-300/50", chart: "#e879f9", text: "text-fuchsia-200" },
 };
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- untyped JSON from /api/galaxy
 type GalaxyPost = (body: Record<string, unknown>) => Promise<{ res: Response; data: Record<string, any> }>;
 
 export function GalaxyMarket({

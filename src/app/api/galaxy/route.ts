@@ -105,6 +105,28 @@ export async function GET(req: Request) {
     });
   }
 
+  // Invasion fleets (migration 011): settles any that have arrived, then lists the ones still flying
+  // at us (so the defender can answer) and from us (to show a countdown).
+  if (params.has("fleets")) {
+    if (!worldId) return NextResponse.json({ fleets: true, incoming: [], outgoing: [] });
+    const settled = await supabase.rpc("settle_invasions");
+    if (notMigrated(settled.error)) return NextResponse.json({ fleets: false, incoming: [], outgoing: [] });
+    const columns = "id, from_world_id, to_world_id, from_name, to_name, fleet, answer, arrives_at";
+    const [incoming, outgoing] = await Promise.all([
+      supabase.from("invasion_fleets").select(columns).eq("to_world_id", worldId).eq("status", "flying").order("id"),
+      supabase.from("invasion_fleets").select(columns).eq("from_world_id", worldId).eq("status", "flying").order("id"),
+    ]);
+    if (incoming.error || outgoing.error) return NextResponse.json({ error: (incoming.error ?? outgoing.error)!.message }, { status: 500 });
+    const now = Date.now();
+    const left = (f: { arrives_at: string }) => Math.max(0, Math.round((Date.parse(f.arrives_at) - now) / 1000));
+    return NextResponse.json({
+      fleets: true,
+      settled: settled.data ?? 0,
+      incoming: (incoming.data ?? []).map((f) => ({ ...f, seconds_left: left(f) })),
+      outgoing: (outgoing.data ?? []).map((f) => ({ ...f, seconds_left: left(f) })),
+    });
+  }
+
   if (params.has("market")) {
     if (!rooms || !galaxy) {
       return NextResponse.json({ enabled: true, me: me ?? null, orders: [], trades: [] });
@@ -250,6 +272,11 @@ export async function POST(req: Request) {
       ({ data, error } = await supabase.rpc("sync_planet", args));
     }
     if (error) return galaxyError(error, "sync_planet");
+    // How well this planet holds off a fleet (migration 011); ignored before that migration is run.
+    const defence = Number(body.defence);
+    if (Number.isFinite(defence) && defence >= 0) {
+      await supabase.from("planets").update({ defence: Math.min(defence, 1e6) }).eq("world_id", String(body.worldId)).eq("owner_token", String(body.ownerToken));
+    }
     return NextResponse.json({ planet: data, deltas });
   }
 
@@ -270,6 +297,25 @@ export async function POST(req: Request) {
           ? await supabase.rpc("answer_trade_offer", { p_world_id: body.worldId, p_owner_token: body.ownerToken, p_offer_id: offerId, p_accept: body.accept === true })
           : await supabase.rpc("cancel_trade_offer", { p_world_id: body.worldId, p_owner_token: body.ownerToken, p_offer_id: offerId });
     if (notMigrated(error)) return NextResponse.json({ ok: false, reason: "not_migrated" }, { status: 503 });
+    if (error) return galaxyError(error, action);
+    return NextResponse.json(data);
+  }
+
+  // Invasion fleets (migration 011): launch one, or answer one coming at us (fight, tribute or shields).
+  if (action === "launch_invasion" || action === "answer_invasion") {
+    if (!isUuid(String(body.worldId ?? "")) || !body.ownerToken) {
+      return NextResponse.json({ error: "Missing planet or owner token" }, { status: 400 });
+    }
+    const { data, error } =
+      action === "launch_invasion"
+        ? await supabase.rpc("launch_invasion", {
+            p_world_id: body.worldId, p_owner_token: body.ownerToken, p_target_world_id: String(body.targetWorldId ?? ""),
+            p_fleet: Math.max(0, Math.min(100000, Math.floor(Number(body.fleet)) || 0)), p_attack: Math.max(0, Number(body.attack) || 0),
+          })
+        : await supabase.rpc("answer_invasion", {
+            p_world_id: body.worldId, p_owner_token: body.ownerToken, p_fleet_id: Number(body.fleetId) || 0, p_answer: String(body.answer ?? ""),
+          });
+    if (notMigrated(error)) return NextResponse.json({ ok: false, reason: "not_migrated" });
     if (error) return galaxyError(error, action);
     return NextResponse.json(data);
   }
