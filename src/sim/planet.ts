@@ -127,7 +127,8 @@ export type Meteor = { id: number; face: number; at: number; radius: number; fal
 // Volcanoes stay on the map. Most of the time they sleep; `active` while erupting, then dormant until `wakeAt`.
 export type Volcano = { id: number; face: number; active: boolean; at: number; life: number; nextBurst: number; wakeAt: number };
 // The latest thing that happened, for the HUD's pop-up.
-export type Alert = { icon: string; title: string; text: string; at: number; face: number };
+export type Alert = { icon: string; title: string; text: string; at: number; face: number; shown?: number }; // shown: real time (ms) it went up
+export const ALERT_MS = 10_000; // every pop-up stays up at least this long; news that arrives meanwhile waits its turn
 
 // The sim runs in fast ticks (one per real second); a calendar year is this many of them.
 export const SECONDS_PER_YEAR = 25;
@@ -660,6 +661,9 @@ export class PlanetSim {
   // ---- Time ----
 
   step(dt: number) {
+    if (this.alertQueue.length && (!this.alert || Date.now() - (this.alert.shown ?? 0) >= ALERT_MS)) {
+      this.alert = { ...this.alertQueue.shift()!, at: this.year, shown: Date.now() };
+    }
     this.year += dt;
     this.outputTimer += dt;
     if (this.outputTimer >= 2) {
@@ -1108,8 +1112,10 @@ export class PlanetSim {
   demo = false; // no win/lose screen, so nothing interrupts a pitch
   startDemo() {
     this.demo = true;
-    this.pace = 4;
-    this.techBoost = 2;
+    // 2x clock (was 4x: too hectic to follow), with eras climbing twice as fast again, so the
+    // Space Age still arrives as quickly as before while disasters and news come half as often.
+    this.pace = 2;
+    this.techBoost = 4;
   }
 
   // Demo shortcut: put your nation on the edge of the Space Age, so the next tick launches it (and unlocks the galaxy).
@@ -1905,9 +1911,17 @@ export class PlanetSim {
     this.version++;
   }
 
+  private alertQueue: Alert[] = [];
   private announce(icon: string, title: string, text: string, face: number, minor = false) {
     if (minor && this.alert && this.year - this.alert.at < MINOR_ALERT_GAP) return;
-    this.alert = { icon, title, text, at: this.year, face };
+    const next = { icon, title, text, at: this.year, face };
+    const busy = this.alert && Date.now() - (this.alert.shown ?? 0) < ALERT_MS;
+    if (!busy) this.alert = { ...next, shown: Date.now() };
+    else if (!minor) {
+      // Big news waits its turn (at most 2 waiting; older routine news makes way).
+      this.alertQueue.push(next);
+      if (this.alertQueue.length > 2) this.alertQueue.shift();
+    } // routine news while a pop-up is up is simply skipped (it's still in the chronicle)
     if (!minor && DISASTER_ICONS.has(icon)) this.offer("disaster", title, text, face, [...this.nationsIn(this.tilesNear(face, 0.2).map(([f]) => f))]);
   }
 
