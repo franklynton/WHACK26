@@ -68,6 +68,7 @@ export function GameRightPanel({
   chronicle,
   busy,
   nationColors,
+  onOpenChronicle,
 }: {
   nation: NationInfo;
   civ: Civ | null;
@@ -89,6 +90,7 @@ export function GameRightPanel({
   chronicle: (ChronicleEntry & { nation?: number })[];
   busy: "" | "narrating" | "thinking";
   nationColors: { name: string; color: string }[];
+  onOpenChronicle: () => void;
 }) {
   return (
     <aside className="glass subtle-scrollbar absolute bottom-4 right-4 top-4 flex w-72 flex-col p-4">
@@ -222,28 +224,24 @@ export function GameRightPanel({
         </button>
       </div>
 
-      <div className="mb-2 flex items-center justify-between">
-        <p className="label">Chronicle</p>
-        {busy === "narrating" && <span className="text-[10px] uppercase tracking-wider text-amber-200/60 animate-pulse">Writing…</span>}
-      </div>
-      <ol className="subtle-scrollbar flex-1 space-y-2 overflow-y-auto pr-1">
-        {[...chronicle].reverse().map((entry, index) => (
-          <li key={chronicle.length - index} className="chronicle-entry">
-            <div className="chronicle-year"><span>Year</span><strong>{Math.floor(entry.year)}</strong></div>
-            <div className="min-w-0 flex-1 text-[13px] leading-snug text-white/75">
-              {entry.nation != null && (
-                <span
-                  className="mr-1.5 inline-block h-2 w-2 align-middle rounded-full"
-                  style={{ background: nationColors[entry.nation]?.color }}
-                  title={nationColors[entry.nation]?.name}
-                />
-              )}
-              {entry.text}
-            </div>
-          </li>
-        ))}
-        {!chronicle.length && <li className="py-3 text-xs text-white/40">The story of this world will appear here.</li>}
-      </ol>
+      <button
+        type="button"
+        onClick={onOpenChronicle}
+        className="group -mx-1 flex w-[calc(100%+0.5rem)] items-center justify-between rounded-xl border border-white/0 px-2 py-2 text-left transition hover:border-white/10 hover:bg-white/[0.04]"
+      >
+        <span>
+          <span className="label block">📜 Chronicle Book</span>
+          <span className="mt-1 block max-w-56 truncate text-xs text-white/55">
+            {chronicle.length ? [...chronicle].reverse()[0].text : "The story of this world will appear here."}
+          </span>
+        </span>
+        <span className="ml-3 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-white/60 transition group-hover:bg-white/10 group-hover:text-white">
+          →
+        </span>
+      </button>
+      {busy === "narrating" && (
+        <span className="mt-1 block text-right text-[10px] uppercase tracking-wider text-amber-200/60 animate-pulse">Writing…</span>
+      )}
     </aside>
   );
 }

@@ -64,30 +64,42 @@ body {
   font-size: 0.7rem;
   line-height: 1.35;
 }
+.chronicle-list {
+  min-height: 0;
+}
 .chronicle-entry {
-  display: flex;
+  display: grid;
+  grid-template-columns: 2.45rem minmax(0, 1fr);
   gap: 0.65rem;
-  align-items: flex-start;
-  padding: 0.55rem 0.5rem;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 0.65rem;
-  background: rgba(255, 255, 255, 0.025);
+  align-items: start;
+  padding: 0.7rem 0.25rem 0.7rem 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+.chronicle-entry:first-child {
+  border-top: 0;
+  padding-top: 0.2rem;
+}
+.chronicle-entry-new > div:last-child {
+  color: rgba(255, 255, 255, 0.86);
 }
 .chronicle-year {
   display: flex;
-  min-width: 2.8rem;
+  height: 2.35rem;
   flex-direction: column;
-  padding-top: 0.05rem;
-  color: rgba(255, 255, 255, 0.38);
-  font-size: 0.58rem;
-  line-height: 1.1;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid rgba(186, 230, 253, 0.12);
+  color: rgba(255, 255, 255, 0.32);
+  font-size: 0.52rem;
+  line-height: 1.05;
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
 .chronicle-year strong {
-  margin-top: 0.2rem;
-  color: rgba(186, 230, 253, 0.8);
+  margin-top: 0.14rem;
+  color: rgba(186, 230, 253, 0.88);
   font-size: 0.78rem;
+  line-height: 1;
   letter-spacing: 0;
 }
 .tool {

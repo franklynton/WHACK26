@@ -15,6 +15,7 @@ import {
   ResourcePanel,
 } from "./GameHud";
 import { GameRightPanel } from "./GameRightPanel";
+import ChronicleBook from "./ChronicleBook";
 import { GameOverlays } from "./GameOverlays";
 import { NationHoverCard } from "./GameHoverCards";
 import { type RaceId } from "@/sim/races";
@@ -220,6 +221,7 @@ export default function Game({
   );
   const [sel, setSel] = useState(() => ui?.sel ?? 0); // the nation the god is looking at and talking to
   const [expandedNation, setExpandedNation] = useState<number | null>(null);
+  const [chronicleOpen, setChronicleOpen] = useState(false);
   const [busy, setBusy] = useState<"" | "narrating" | "thinking">("");
   const [focus, setFocus] = useState<{ face: number; key: number } | null>(
     null,
@@ -761,7 +763,16 @@ export default function Game({
         chronicle={chronicle}
         busy={busy}
         nationColors={sim.nations}
+        onOpenChronicle={() => setChronicleOpen(true)}
       />
+      {chronicleOpen && (
+        <ChronicleBook
+          entries={chronicle}
+          busy={busy}
+          nationColors={sim.nations}
+          onClose={() => setChronicleOpen(false)}
+        />
+      )}
       {hud.god.outcome && !seenOutcome && (
         <OutcomeDialog
           outcome={hud.god.outcome}
