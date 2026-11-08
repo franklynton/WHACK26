@@ -75,6 +75,7 @@ export default function Galaxy({
   const [planets, setPlanets] = useState<PlanetRow[]>([]);
   const [draft, setDraft] = useState("");
   const [switching, setSwitching] = useState(false); // the "Switch galaxy" code box is open
+  const [joinFormOpen, setJoinFormOpen] = useState(false);
   const [aloneLocal, setAloneLocal] = useState(false); // before migration 003 there are no rooms, so "Play alone" is kept here
   const [error, setError] = useState(""); // a join that failed, shown under the code box like a form error
   const [message, setMessage] = useState("");
@@ -120,6 +121,26 @@ export default function Galaxy({
       if (joining.current) return false;
       joining.current = true;
       try {
+        // Ensure this planet row exists before the join RPC. This prevents a fast click after opening
+        // the landing/game from racing the first five-second database sync.
+        const stats = sim.stats();
+        const hash = [...ids.world].reduce((n, c) => (n * 31 + c.charCodeAt(0)) | 0, 7);
+        const synced = await post({
+          action: "sync",
+          ownerName,
+          planetName,
+          planetType: stats.planetType,
+          population: stats.population,
+          villages: stats.villages,
+          output: Math.round(sim.output),
+          military: sim.military(),
+          resources: sim.galaxySnapshot().sent,
+          positionX: (hash & 0xffff) / 0xffff,
+          positionY: ((hash >>> 16) & 0xffff) / 0xffff,
+        });
+        if (!synced.res.ok) {
+          throw new Error(synced.data.error || "Couldn't register this planet");
+        }
         const { data } = await post({ action: "join", code: c });
         if (data.ok) {
           wanted.current = c;
@@ -129,7 +150,7 @@ export default function Galaxy({
           setDraft("");
           setSwitching(false);
           setMessage(data.created ? `You created galaxy ${c}. Share the code so others can join.` : `You joined galaxy ${c}.`);
-          if (!auto) sim.galaxyNews("🌌", data.created ? "A new galaxy" : "You joined a galaxy", data.created ? `You created galaxy ${c}. Up to ${GALAXY_MAX} gods can join.` : `You joined galaxy ${c} (${data.members}/${GALAXY_MAX} gods).`);
+          if (!auto) sim.galaxyNews("", data.created ? "A new galaxy" : "You joined a galaxy", data.created ? `You created galaxy ${c}. Up to ${GALAXY_MAX} gods can join.` : `You joined galaxy ${c} (${data.members}/${GALAXY_MAX} gods).`);
           return true;
         }
         const why = joinError(data.reason, c, data.members);
@@ -138,17 +159,17 @@ export default function Galaxy({
           // Our place went while we were away (or the galaxy filled up before we arrived): stop retrying.
           wanted.current = null;
           setWantedGalaxy(null);
-          sim.galaxyNews("🌌", "Couldn't rejoin the galaxy", why);
+          sim.galaxyNews("", "Couldn't rejoin the galaxy", why);
         }
         return false;
-      } catch {
-        setError(joinError(undefined, c));
+      } catch (caught) {
+        setError(caught instanceof Error && caught.message ? caught.message : joinError(undefined, c));
         return false;
       } finally {
         joining.current = false;
       }
     },
-    [sim, post],
+    [sim, post, ids, ownerName, planetName],
   );
 
   const load = useCallback(async () => {
@@ -167,8 +188,8 @@ export default function Galaxy({
       // Announce gods who arrive or leave after we're in (not the ones already here when we joined).
       const now = new Map(rows.map((p) => [p.world_id, p]));
       if (seen.current && seen.current.galaxy === here) {
-        for (const p of rows) if (!seen.current.gods.has(p.world_id)) sim.galaxyNews("🛸", "A new god appears", `${p.owner_name} and the planet ${p.planet_name} have joined the galaxy.`, false);
-        for (const [id, p] of seen.current.gods) if (!now.has(id)) sim.galaxyNews("👋", "A god has left", `${p.owner_name} and ${p.planet_name} left the galaxy.`);
+        for (const p of rows) if (!seen.current.gods.has(p.world_id)) sim.galaxyNews("", "A new god appears", `${p.owner_name} and the planet ${p.planet_name} have joined the galaxy.`, false);
+        for (const [id, p] of seen.current.gods) if (!now.has(id)) sim.galaxyNews("", "A god has left", `${p.owner_name} and ${p.planet_name} left the galaxy.`);
       }
       seen.current = { galaxy: here, gods: now };
       if (since.current != null) (data.actions as Action[]).forEach(apply);
@@ -254,14 +275,36 @@ export default function Galaxy({
   };
 
   const createRandomGalaxy = async () => {
-    await joinRandomGalaxy();
+    await randomGalaxy("random_create");
   };
 
   const joinRandomGalaxy = async () => {
+    await randomGalaxy("random_join");
+  };
+
+  const randomGalaxy = async (action: "random_join" | "random_create") => {
     if (joining.current) return;
     joining.current = true;
     try {
-      const { data } = await post({ action: "random_join" });
+      const stats = sim.stats();
+      const hash = [...ids.world].reduce((n, c) => (n * 31 + c.charCodeAt(0)) | 0, 7);
+      const synced = await post({
+        action: "sync",
+        ownerName,
+        planetName,
+        planetType: stats.planetType,
+        population: stats.population,
+        villages: stats.villages,
+        output: Math.round(sim.output),
+        military: sim.military(),
+        resources: sim.galaxySnapshot().sent,
+        positionX: (hash & 0xffff) / 0xffff,
+        positionY: ((hash >>> 16) & 0xffff) / 0xffff,
+      });
+      if (!synced.res.ok) {
+        throw new Error(synced.data.error || "Couldn't register this planet");
+      }
+      const { data } = await post({ action });
       if (data.ok) {
         setGalaxy(data.galaxy);
         setError("");
@@ -271,28 +314,35 @@ export default function Galaxy({
         wanted.current = data.galaxy;
         setMessage(data.created ? `You created galaxy ${data.galaxy}.` : `You joined galaxy ${data.galaxy}.`);
         sim.galaxyNews(
-          "🌌",
+          "",
           data.created ? "A new galaxy" : "A random galaxy",
           data.created ? `You created galaxy ${data.galaxy}.` : `You joined galaxy ${data.galaxy} (${data.members}/${GALAXY_MAX} gods).`,
         );
+        await load();
       } else {
-        setError(joinError(data.reason, data.galaxy ?? "", data.members));
+        setError(data.error || joinError(data.reason, data.galaxy ?? "", data.members));
       }
-    } catch {
-      setError("Couldn't find a galaxy. Try again.");
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message ? caught.message : "Couldn't connect to the galaxy server. Try again.");
     } finally {
       joining.current = false;
     }
   };
 
 
-  const invade = async (target: string) => {
-    if (alone) return setMessage("You're playing alone. Join a galaxy to invade.");
+  const invade = async (target: string): Promise<string> => {
+    if (alone) {
+      const text = "You're playing alone. Join a galaxy to invade.";
+      setMessage(text);
+      return text;
+    }
     setMessage("Your ships set off...");
     await sync(); // so the galaxy knows our strength right now
     const { data } = await post({ action: "invasion", targetWorldId: target });
-    setMessage(data.message || data.error || "Galaxy action failed");
+    const result = data.message || data.error || "Galaxy action failed";
+    setMessage(result);
     await load(); // picks up the completed action and applies our half of it
+    return result;
   };
 
   // Playing alone: in no galaxy (or, before migration 003, opted out of the shared list). No trading or invading.
@@ -330,7 +380,7 @@ export default function Galaxy({
           aria-describedby={error ? "galaxy-error" : undefined}
           className={`min-w-0 flex-1 rounded-lg bg-white/10 px-3 py-1.5 font-mono text-sm uppercase outline-none placeholder:text-white/30 ${error ? "ring-1 ring-rose-400" : "focus:ring-1 focus:ring-indigo-300"}`}
         />
-        <button className="rounded-lg bg-indigo-400/25 px-3 py-1.5 text-xs font-semibold hover:bg-indigo-400/40">Join or create</button>
+        <button className="rounded-lg bg-indigo-400/25 px-3 py-1.5 text-xs font-semibold hover:bg-indigo-400/40">Join galaxy</button>
         {onCancel && (
           <button type="button" onClick={onCancel} className="rounded-lg bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10">
             Cancel
@@ -351,7 +401,7 @@ export default function Galaxy({
       <div className="glass subtle-scrollbar relative max-h-[82vh] w-[44rem] overflow-y-auto p-4" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between border-b border-white/10 pb-3">
           <div>
-            <p className="text-lg font-bold">🌌 Galaxy</p>
+            <p className="text-lg font-bold">Galaxy</p>
             {galaxy && (
               <p className="mt-0.5 font-mono text-xs text-indigo-200">
                 {galaxy} <span className="text-white/40">· {members}/{GALAXY_MAX} gods</span>
@@ -365,15 +415,15 @@ export default function Galaxy({
                   onClick={() => setSwitching((v) => !v)}
                   className="rounded-lg border border-indigo-300/20 bg-indigo-400/10 px-3 py-1.5 text-xs font-semibold text-indigo-100 hover:bg-indigo-400/20"
                 >
-                  ⇄ Switch galaxy
+                  Switch galaxy
                 </button>
                 <button onClick={leave} className="rounded-lg border border-rose-300/20 bg-rose-400/10 px-3 py-1.5 text-xs font-semibold text-rose-100 hover:bg-rose-400/20">
-                  ✕ Leave galaxy
+                  Leave galaxy
                 </button>
               </>
             )}
             <button onClick={onClose} className="ml-1 rounded-lg px-2 py-1.5 text-white/50 hover:bg-white/5 hover:text-white" aria-label="Close">
-              ✕
+              Close
             </button>
           </div>
         </div>
@@ -392,7 +442,7 @@ export default function Galaxy({
                 + Create random galaxy
               </button>
               <button onClick={joinRandomGalaxy} className="rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-3 py-2 text-xs font-semibold text-emerald-100 hover:bg-emerald-400/20">
-                🎲 Join random galaxy
+                Join random galaxy
               </button>
             </div>
           </div>
@@ -401,17 +451,31 @@ export default function Galaxy({
         {enabled && rooms && !galaxy && (
           <div className="rounded-lg bg-white/[0.035] p-4">
             <p className="mb-3 text-sm text-white/60">Join a galaxy to trade or invade other planets.</p>
-            <div className="mb-3 grid grid-cols-2 gap-2">
-              <button onClick={createRandomGalaxy} className="rounded-lg border border-indigo-300/20 bg-indigo-400/15 px-3 py-2.5 text-sm font-semibold text-indigo-100 hover:bg-indigo-400/25">
-                + Create galaxy
-                <span className="block text-[10px] font-normal text-indigo-200/60">Generates a 5-digit code</span>
+            <div className="mb-3 grid grid-cols-3 gap-2">
+              <button
+                onClick={() => {
+                  setJoinFormOpen((value) => !value);
+                  setError("");
+                }}
+                className={`rounded-lg border px-3 py-2.5 text-sm font-semibold transition ${joinFormOpen ? "border-indigo-300/40 bg-indigo-400/25 text-indigo-100" : "border-indigo-300/20 bg-indigo-400/15 text-indigo-100 hover:bg-indigo-400/25"}`}
+              >
+                {joinFormOpen ? "Close code field" : "Join galaxy"}
+                <span className="block text-[10px] font-normal text-indigo-200/60">Enter an existing galaxy code</span>
+              </button>
+              <button onClick={createRandomGalaxy} className="rounded-lg border border-violet-300/20 bg-violet-400/10 px-3 py-2.5 text-sm font-semibold text-violet-100 hover:bg-violet-400/20">
+                Create galaxy
+                <span className="block text-[10px] font-normal text-violet-200/60">Generate a new galaxy code</span>
               </button>
               <button onClick={joinRandomGalaxy} className="rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-3 py-2.5 text-sm font-semibold text-emerald-100 hover:bg-emerald-400/20">
-                🎲 Join random
+                Join random galaxy
                 <span className="block text-[10px] font-normal text-emerald-200/60">Join an available galaxy</span>
               </button>
             </div>
-            {codeForm("Galaxy code", "Use a friend's code, or enter a new one to create a galaxy.")}
+            {joinFormOpen && (
+              <div className="mb-3 rounded-lg border border-white/[0.07] bg-black/10 p-3">
+                {codeForm("Galaxy code", "Enter the code of an existing galaxy.")}
+              </div>
+            )}
             {message && !error && <p className="mt-3 text-xs text-sky-200">{message}</p>}
           </div>
         )}
@@ -422,19 +486,19 @@ export default function Galaxy({
               onClick={() => setTab("invade")}
               className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${tab === "invade" ? "bg-rose-400/20 text-rose-100 ring-1 ring-rose-300/20" : "bg-white/5 text-white/55 hover:text-white"}`}
             >
-              ⚔ Invade
+              Invade
             </button>
             <button
               onClick={() => setTab("market")}
               className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${marketOpen ? "bg-amber-400/20 text-amber-100 ring-1 ring-amber-300/20" : "bg-white/5 text-white/55 hover:text-white"}`}
             >
-              ⚖ Market
+              Market
             </button>
             <button
               onClick={() => setTab("offers")}
               className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${tab === "offers" ? "bg-sky-400/20 text-sky-100 ring-1 ring-sky-300/20" : "bg-white/5 text-white/55 hover:text-white"}`}
             >
-              🤝 Offers{offers.outgoing.some((o) => o.status === "pending") ? " ·" : ""}
+              Offers{offers.outgoing.some((o) => o.status === "pending") ? " ·" : ""}
             </button>
           </div>
         )}
@@ -448,7 +512,6 @@ export default function Galaxy({
         {/* Before migration 003 there are no rooms: everyone online is listed, so "Play alone" hides them here */}
         {enabled && !rooms && (
           <div className="mb-3 flex items-center justify-between rounded-lg bg-white/5 p-3 text-xs">
-            <span className="text-white/60">{aloneLocal ? "🧘 Playing alone: trading and invading are off." : "Every god online is here."}</span>
             <button onClick={() => setAloneLocal((v) => !v)} className={aloneLocal ? "text-indigo-200 hover:text-white" : "text-rose-300 hover:text-rose-200"}>
               {aloneLocal ? "Meet other gods" : "Play alone"}
             </button>
@@ -459,7 +522,6 @@ export default function Galaxy({
           <GalaxyInvasion
             enabled={enabled}
             alone={alone}
-            galaxy={galaxy}
             planets={shown}
             spacefaring={spacefaring}
             onInvade={invade}

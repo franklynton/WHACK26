@@ -129,7 +129,7 @@ export function GameRightPanel({
             <span className="block text-xs text-white/55">
               {RACE[nation.race].icon} {RACE[nation.race].name} · {ERAS[nation.era]}
             </span>
-            <span className="block text-xs text-sky-300">🗣️ Talk to the leader</span>
+            <span className="block text-xs text-sky-300">Talk to the leader</span>
           </span>
         </button>
         <NeedBars needs={nation.needs} love={nation.love} />
@@ -174,9 +174,9 @@ export function GameRightPanel({
         <p className="label mb-2">Galaxy</p>
         <div className="grid grid-cols-3 gap-2">
           {([
-            ["invade", "⚔️", "Invade", "Launch an attack"],
-            ["market", "⚖️", "Market", "Trade resources"],
-            ["offers", "🤝", "Offers", "Swap with a god"],
+            ["invade", "", "Invade", "Launch an attack"],
+            ["market", "", "Market", "Trade resources"],
+            ["offers", "", "Offers", "Swap with a god"],
           ] as const).map(([view, icon, label, action]) => {
             const disabled = !link.galaxy || (view === "invade" && !spacefaring);
             const className =
@@ -207,7 +207,7 @@ export function GameRightPanel({
                         : "Offer a swap to another god"
                 }
               >
-                <span className="block text-lg">{icon}</span>
+                {icon && <span className="block text-lg">{icon}</span>}
                 <span className="mt-1 block text-sm font-semibold">{label}</span>
                 <span className="block text-[10px] text-current opacity-60">
                   {!link.galaxy ? "Join a galaxy first" : view === "invade" && !spacefaring ? "Space Age required" : action}
@@ -220,7 +220,7 @@ export function GameRightPanel({
           onClick={() => onOpenGalaxy("join")}
           className={`mt-2 w-full rounded-lg px-3 py-2 text-sm font-semibold transition ${link.galaxy ? "bg-indigo-400/15 text-indigo-100 hover:bg-indigo-400/25" : "bg-indigo-400/30 text-white hover:bg-indigo-400/40"}`}
         >
-          {link.galaxy ? `Galaxy ${link.galaxy} · Manage` : "🌌 Join a galaxy"}
+          {link.galaxy ? `Galaxy ${link.galaxy} · Manage` : "Join a galaxy"}
         </button>
       </div>
 
@@ -230,7 +230,7 @@ export function GameRightPanel({
         className="group -mx-1 flex w-[calc(100%+0.5rem)] items-center justify-between rounded-xl border border-white/0 px-2 py-2 text-left transition hover:border-white/10 hover:bg-white/[0.04]"
       >
         <span>
-          <span className="label block">📜 Chronicle Book</span>
+          <span className="label block">Chronicle Book</span>
           <span className="mt-1 block max-w-56 truncate text-xs text-white/55">
             {chronicle.length ? [...chronicle].reverse()[0].text : "The story of this world will appear here."}
           </span>

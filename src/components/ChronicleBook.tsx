@@ -78,7 +78,7 @@ export default function ChronicleBook({
               className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/5 text-lg text-white/55 transition hover:bg-white/10 hover:text-white"
               aria-label="Close Chronicle"
             >
-              ✕
+              Close
             </button>
           </div>
         </header>

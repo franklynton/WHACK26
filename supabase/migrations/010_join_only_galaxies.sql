@@ -19,7 +19,6 @@ begin
   if not found then return jsonb_build_object('ok', false, 'reason', 'no_planet'); end if;
   if me.owner_token <> p_owner_token then raise exception 'Not your planet'; end if;
 
-  perform galaxy_tidy();
   perform 1 from galaxies where code = c for update;
 
   if me.galaxy = c then

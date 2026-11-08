@@ -1,5 +1,17 @@
 @import "tailwindcss";
 
+@keyframes invasion-flight {
+  0% { transform: translateX(0) rotate(45deg); opacity: 0.35; }
+  15% { opacity: 1; }
+  100% { transform: translateX(30rem) rotate(45deg); opacity: 0.15; }
+}
+.invasion-fleet {
+  animation: invasion-flight 1.6s ease-in-out infinite;
+  transform: rotate(45deg);
+  font-size: 0.7rem;
+  text-shadow: 0 0 10px currentColor;
+}
+
 body {
   background: #05060f;
   color: #f1f5f9;
