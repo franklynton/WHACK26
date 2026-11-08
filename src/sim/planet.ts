@@ -52,6 +52,7 @@ export interface Village {
   houses: number;
   nation: number;
   tier: 0 | 1 | 2; // village, town, city
+  overseas?: boolean; // founded by settlers who came by boat, so it needn't touch the capital's land
 }
 
 // Settlement names: each nation draws from its own sounds, so its places sound alike.
@@ -107,7 +108,8 @@ const FATE_ICONS: Record<GodPower, string> = {
 export type Wave = { id: number; face: number; at: number; r: number };
 // A ship sails from tile to tile across the sea (`from` -> `face`, `t` along the way).
 // Warships belong to a nation; merchants carry trade between two nations; pirates (nation -1) belong to no one.
-export type Ship = { id: number; kind: "war" | "merchant" | "pirate"; nation: number; dest?: number; port?: number; face: number; from: number; t: number; path: number[]; hp: number; cooldown: number; replan: number };
+// Settler boats carry `aboard` people to found a village on another island, landing at `land`.
+export type Ship = { id: number; kind: "war" | "merchant" | "pirate" | "settler"; nation: number; dest?: number; land?: number; aboard?: number; port?: number; face: number; from: number; t: number; path: number[]; hp: number; cooldown: number; replan: number };
 // ---- The god's own powers (see the "God" section of PlanetSim) ----
 export type MiracleId = "bless" | "rain" | "calm" | "smite";
 export const MIRACLES: { id: MiracleId; name: string; icon: string; cost: number; cooldown: number; tool: GodPower; blurb: string }[] = [
@@ -1344,6 +1346,7 @@ export class PlanetSim {
   ships: Ship[] = [];
   private navyTimer = 3;
   private tradeTimer = 8;
+  private colonyTimer = 15;
   private pirateTimer = 90;
 
   navySize(id: number) {
@@ -1367,7 +1370,7 @@ export class PlanetSim {
 
   // Would `a` fire on `b`? Warships fight enemies at war and pirates; pirates attack everyone; merchants never fight.
   private hostile(a: Ship, b: Ship) {
-    if (a.kind === "merchant" || a === b) return false;
+    if (a.kind === "merchant" || a.kind === "settler" || a === b) return false;
     if (a.kind === "pirate") return b.kind !== "pirate";
     return b.kind === "pirate" || (b.kind === "war" && this.atWar(a.nation, b.nation));
   }
@@ -1458,6 +1461,17 @@ export class PlanetSim {
         }
       }
     }
+    // Settlers: once a nation has boats, a crowded coastal village may send a few people across the sea
+    // to free land on another island. The new village belongs to the same nation.
+    this.colonyTimer -= dt;
+    if (this.colonyTimer <= 0) {
+      this.colonyTimer = 10;
+      for (const nt of this.nations) {
+        if (!nt.alive || eraOf(nt.tech) < NAVY_ERA || this.ships.some((s) => s.kind === "settler" && s.nation === nt.id)) continue;
+        if (Math.random() > (nt.policy === "expand" || nt.policy === "explore" ? 0.5 : 0.25)) continue;
+        if (this.sendSettlers(nt.id)) break; // one boat at a time across the planet keeps it readable
+      }
+    }
     // Pirates: now and then a pirate ship appears out on the open sea.
     this.pirateTimer -= dt;
     if (this.pirateTimer <= 0) {
@@ -1481,6 +1495,10 @@ export class PlanetSim {
             this.deliver(sh);
             continue;
           }
+          if (sh.kind === "settler") {
+            if (!sh.path.length) this.landSettlers(sh);
+            continue;
+          }
           this.planRoute(sh);
         }
         const next = sh.path.shift();
@@ -1490,7 +1508,7 @@ export class PlanetSim {
       }
       // Fight: fire on a hostile ship in range, or raid/shell a settlement.
       sh.cooldown -= dt;
-      if (sh.cooldown > 0 || sh.kind === "merchant") continue;
+      if (sh.cooldown > 0 || sh.kind === "merchant" || sh.kind === "settler") continue;
       const foe = this.ships.find((o) => o.hp > 0 && this.hostile(sh, o) && this.angle(o.face, sh.face) < 0.05);
       if (foe) {
         sh.cooldown = 1.5;
@@ -1527,12 +1545,93 @@ export class PlanetSim {
     if (Math.random() < 0.25) this.events.push({ kind: "diplomacy", detail: `A merchant ship from ${this.nationName(a)} reached ${this.nationName(b)}, laden with goods.`, nation: a, other: b });
   }
 
+  // Which landmass each land tile is on (-1 for sea), worked out from the map as it is now.
+  private landmasses() {
+    const mass = new Int32Array(this.n).fill(-1);
+    let id = 0;
+    for (let f0 = 0; f0 < this.n; f0++) {
+      if (mass[f0] >= 0 || isWater(this.terrain[f0] as T)) continue;
+      const tiles = [f0];
+      mass[f0] = id;
+      for (let i = 0; i < tiles.length; i++)
+        for (let k = 0; k < 3; k++) {
+          const nb = this.neighbours[tiles[i] * 3 + k];
+          if (mass[nb] < 0 && !isWater(this.terrain[nb] as T)) {
+            mass[nb] = id;
+            tiles.push(nb);
+          }
+        }
+      id++;
+    }
+    return mass;
+  }
+
+  // Sends a boat of settlers from one of the nation's crowded coastal villages to the nearest free,
+  // good land on a different landmass (searching outwards over the sea). Returns true if one set off.
+  private sendSettlers(nation: number) {
+    const mass = this.landmasses();
+    const homes = new Set(this.villages.filter((v) => v.nation === nation).map((v) => mass[v.face]));
+    const from = this.villages.filter((v) => v.nation === nation && v.residents >= 6).sort((a, b) => b.residents - a.residents);
+    for (const v of from.slice(0, 4)) {
+      const port = this.harbour(v.face);
+      if (port < 0) continue;
+      const parent = new Int32Array(this.n).fill(-2);
+      parent[port] = -1;
+      const order = [port];
+      let found = -1, land = -1;
+      for (let i = 0; i < order.length && order.length < 15000 && found < 0; i++) {
+        const f = order[i];
+        for (let k = 0; k < 3 && found < 0; k++) {
+          const nb = this.neighbours[f * 3 + k];
+          if (parent[nb] !== -2) continue;
+          if (isWater(this.terrain[nb] as T)) {
+            parent[nb] = f;
+            order.push(nb);
+          } else if (i > 6 && !homes.has(mass[nb]) && this.owner[nb] < 0 && (this.terrain[nb] === T.Grass || this.terrain[nb] === T.Forest || this.terrain[nb] === T.Sand) && this.roomFor(nb, nation)) {
+            [found, land] = [f, nb];
+          }
+        }
+      }
+      if (found < 0) continue;
+      // Up to four young adults leave the village and board.
+      const crew = new Set(this.people.filter((p) => p.village === v.id && p.age > 16 && p.age < 40).slice(0, 4));
+      if (crew.size < 2) continue;
+      this.people = this.people.filter((p) => !crew.has(p));
+      const path: number[] = [];
+      for (let f = found; f !== port && f >= 0; f = parent[f]) path.push(f);
+      const sh = this.launch("settler", nation, port, { land, aboard: crew.size, path: path.reverse(), replan: 1e9, hp: 2 });
+      this.events.push({ kind: "village", detail: `Settlers from ${v.name} set sail for a distant shore.`, nation });
+      return !!sh;
+    }
+    return false;
+  }
+
+  // The boat reached the shore: its people found a village there (or join one if someone beat them to it).
+  private landSettlers(sh: Ship) {
+    sh.hp = 0;
+    const land = sh.land!;
+    if (!this.nations[sh.nation]?.alive || isWater(this.terrain[land] as T)) return;
+    const taken = this.owner[land] >= 0 && this.owner[land] !== sh.nation;
+    if (taken || !this.roomFor(land, sh.nation)) return; // someone else got there first: they sail on and are lost
+    const own = this.villages.find((v) => v.nation === sh.nation && this.angle(v.face, land) < VILLAGE_RANGE * 0.5);
+    const v = own ?? this.foundVillage(land, sh.nation);
+    if (!own) {
+      v.overseas = true;
+      const text = `Settlers of ${this.nationName(sh.nation)} crossed the sea and founded ${v.name} on a new island.`;
+      this.events.push({ kind: "milestone", detail: text, nation: sh.nation });
+      this.announce("⛵", "A new shore", text, land);
+    }
+    for (let i = 0; i < (sh.aboard ?? 0) && this.people.length < MAX_PEOPLE; i++)
+      this.people.push({ id: this.nextId++, face: land, from: land, t: Math.random(), hunger: 0.8, age: 18 + Math.random() * 10, village: v.id, nation: sh.nation });
+    this.updateBorders();
+  }
+
   private sunk(foe: Ship, by: Ship) {
     if (foe.kind === "pirate") {
       this.events.push({ kind: "milestone", detail: `${cap(this.nationName(by.nation))} sank a pirate ship.`, nation: by.nation });
       this.gain("gold", 6); // the pirates' hoard
     } else if (by.kind === "pirate") {
-      const what = foe.kind === "merchant" ? "plundered a merchant ship" : "sank a warship";
+      const what = foe.kind === "merchant" ? "plundered a merchant ship" : foe.kind === "settler" ? "sank a boat of settlers" : "sank a warship";
       this.events.push({ kind: "disaster", detail: `Pirates ${what} of ${this.nationName(foe.nation)}.`, nation: foe.nation });
       if (foe.kind === "merchant") this.resources.gold = Math.max(0, this.resources.gold - 5);
     } else this.events.push({ kind: "disaster", detail: `A warship of ${this.nationName(foe.nation)} was sunk by ${this.nationName(by.nation)}.`, nation: foe.nation, other: by.nation });
@@ -1716,8 +1815,9 @@ export class PlanetSim {
     const capital = this.capital(id);
     if (!capital || this.owner[capital.face] !== id) return [];
     const seen = new Uint8Array(this.n);
-    const queue = [capital.face];
-    seen[capital.face] = 1;
+    // Overseas colonies are joined to the capital by sea, so land joined to them counts too.
+    const queue = [capital.face, ...this.villages.filter((v) => v.nation === id && v.overseas && this.owner[v.face] === id).map((v) => v.face)];
+    for (const f of queue) seen[f] = 1;
     for (let i = 0; i < queue.length; i++) {
       for (let k = 0; k < 3; k++) {
         const nb = this.neighbours[queue[i] * 3 + k];
