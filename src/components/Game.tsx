@@ -6,7 +6,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Globe from "./Globe";
 import Galaxy, { type GalaxyStatus } from "./Galaxy";
-import LeaderDialog from "./LeaderDialog";
 import type { Mood } from "./Portrait";
 import { NationList } from "./GamePanels";
 import {
@@ -34,7 +33,6 @@ import {
   fallbackLeader,
   fallbackReaction,
   fallbackThought,
-  type LeaderReply,
 } from "@/lib/narrator";
 import type {
   ChronicleEntry,
@@ -232,14 +230,12 @@ export default function Game({
     y: number;
   } | null>(null); // nation under the mouse
   // Audiences with each nation's leader (separate from the people's shared mind).
-  const [talkTo, setTalkTo] = useState<number | null>(null);
   const [leaderChats, setLeaderChats] = useState<LeaderMessage[][]>(
     () => ui?.leaderChats ?? Array.from({ length: count }, () => []),
   );
   const [moods, setMoods] = useState<Mood[]>(
     () => ui?.moods ?? new Array(count).fill("pleased"),
   );
-  const [leaderBusy, setLeaderBusy] = useState(false);
   const leaderChatsRef = useRef(leaderChats);
   leaderChatsRef.current = leaderChats;
 
@@ -553,70 +549,6 @@ export default function Game({
 
   // An audience with a leader. They speak first when you arrive, then answer each thing you say.
   // What they decide changes the sim: a new focus for their people, or friendship or hostility to a neighbour.
-  const askLeader = async (id: number, history: LeaderMessage[]) => {
-    setLeaderBusy(true);
-    try {
-      const r = await post<LeaderReply>("/api/leader", {
-        world: worldFor(id),
-        chat: history,
-      });
-      const next = leaderChatsRef.current.map((c, i) =>
-        i === id
-          ? [...history, { from: "leader" as const, text: r.reply }].slice(-30)
-          : c,
-      );
-      leaderChatsRef.current = next;
-      setLeaderChats(next);
-      setMoods((m) => m.map((x, i) => (i === id ? r.mood : x)));
-      const nt = sim.nations[id];
-      const who = `${nt.leader.title} ${nt.leader.name}`;
-      if (r.policy && r.policy !== nt.policy) {
-        nt.policy = r.policy;
-        addEntry({
-          year: sim.calendar,
-          kind: "mind",
-          nation: id,
-          text: `${who} orders ${cap(nt.name)} to turn to ${POLICY_LABEL[r.policy].toLowerCase()}.`,
-        });
-      }
-      const other =
-        r.toward &&
-        sim.nations.find(
-          (o) =>
-            o.id !== id &&
-            o.alive &&
-            o.name.toLowerCase() === r.toward!.nation.toLowerCase(),
-        );
-      if (other) {
-        sim.sway(id, other.id, r.toward!.stance === "hostile" ? 12 : -12); // a ruler's word counts for more than the mind's
-        addEntry({
-          year: sim.calendar,
-          kind: "diplomacy",
-          nation: id,
-          text: `${who} ${r.toward!.stance === "hostile" ? "swears vengeance on" : "sends gifts to"} ${cap(other.name)}.`,
-        });
-      }
-    } finally {
-      setLeaderBusy(false);
-    }
-  };
-  const openLeader = (id: number) => {
-    if (!sim.nations[id].alive) return;
-    setTalkTo(id);
-    if (!leaderChatsRef.current[id].length) askLeader(id, []);
-  };
-  const sayToLeader = (text: string) => {
-    if (talkTo == null) return;
-    const id = talkTo;
-    const history = [
-      ...leaderChatsRef.current[id],
-      { from: "god" as const, text },
-    ];
-    const next = leaderChatsRef.current.map((c, i) => (i === id ? history : c));
-    leaderChatsRef.current = next;
-    setLeaderChats(next);
-    askLeader(id, history);
-  };
 
   const { stats } = hud;
   const civ = civs[sel];
@@ -716,17 +648,6 @@ export default function Game({
         onShowAlert={() => setFocus({ face: hud.alert!.face, key: Date.now() })}
       />
 
-      {talkTo != null && hud.nations[talkTo] && (
-        <LeaderDialog
-          nation={hud.nations[talkTo]}
-          civ={civs[talkTo]}
-          chat={leaderChats[talkTo]}
-          mood={moods[talkTo]}
-          busy={leaderBusy}
-          onSay={sayToLeader}
-          onClose={() => setTalkTo(null)}
-        />
-      )}
 
       {hover && hud.nations[hover.id] && (
         <NationHoverCard
@@ -759,7 +680,6 @@ export default function Game({
         link={link}
         spacefaring={hud.god.spacefaring}
         onOpenGalaxy={setGalaxy}
-        onOpenLeader={() => openLeader(sel)}
         chronicle={chronicle}
         busy={busy}
         nationColors={sim.nations}
