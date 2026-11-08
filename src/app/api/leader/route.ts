@@ -11,7 +11,18 @@ interface Body {
 
 // A nation's leader speaks to the god, in their race's voice. Never fails: falls back to canned lines.
 export async function POST(req: Request) {
-  const { world, chat } = (await req.json()) as Body;
+  let body: Body;
+  try {
+    body = (await req.json()) as Body;
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  if (!body?.world || typeof body.world !== "object") {
+    return NextResponse.json({ error: "World is required" }, { status: 400 });
+  }
+
+  const { world, chat = [] } = body;
   const p = leaderPrompt(world, chat);
   const ai = allowAi(visitorId(req));
   const r = (ai ? await askJson(p.system, p.user, isLeaderReply, 400) : null) ?? fallbackLeader(world, chat);

@@ -12,7 +12,18 @@ interface Body {
 // The people's shared mind thinks: answers the god and picks the people's next focus.
 // Never fails: falls back to a canned thought.
 export async function POST(req: Request) {
-  const { world, chat } = (await req.json()) as Body;
+  let body: Body;
+  try {
+    body = (await req.json()) as Body;
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  if (!body?.world || typeof body.world !== "object") {
+    return NextResponse.json({ error: "World is required" }, { status: 400 });
+  }
+
+  const { world, chat = [] } = body;
   if (!world.civ) return NextResponse.json({ error: "no civ yet" }, { status: 400 });
   const p = thinkPrompt(world, chat);
   const ai = allowAi(visitorId(req));
