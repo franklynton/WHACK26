@@ -1,6 +1,6 @@
 # Arda
 
-**[▶ Play it live](https://arda-frank-3129.vercel.app)** · Built in 24 hours at WHACK26 by a team of four
+**[▶ Play it live](https://play-arda.vercel.app)** · Built in 24 hours at WHACK26 by a team of four
 
 A god game on your own 3D planet. Tiny AI-driven nations live on it, invent a religion about you,
 pray to you, trade, go to war and climb from the Stone Age to the Space Age. Your job is to
