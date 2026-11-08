@@ -40,16 +40,27 @@ interface Action {
 }
 
 
+// A random UUID. crypto.randomUUID only exists on secure pages (https or localhost), so a game opened
+// over the local network (http://192.168.x.x:3000) builds one from crypto.getRandomValues instead.
+function uuid(): string {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40; // version 4
+  b[8] = (b[8] & 0x3f) | 0x80; // variant
+  const h = [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
 // A random id kept in this browser, so a player keeps one planet row (and the secret token that owns it).
 function stored(key: string) {
   try {
     const current = localStorage.getItem(key);
     if (current) return current;
-    const value = crypto.randomUUID();
+    const value = uuid();
     localStorage.setItem(key, value);
     return value;
   } catch {
-    return crypto.randomUUID();
+    return uuid();
   }
 }
 
@@ -91,6 +102,7 @@ export default function Galaxy({
   useEffect(() => {
     if (!open) return;
     if (view === "market" || view === "invade" || view === "offers") setTab(view);
+    if (view === "join") setTab("invade"); // the join form shows on the Invade and Offers tabs
   }, [open, view]);
 
 
@@ -471,9 +483,10 @@ export default function Galaxy({
           </div>
         )}
 
-        {enabled && rooms && !galaxy && (
+        {/* Invading and offers need a galaxy; the market is shared by everyone, so it doesn't */}
+        {enabled && rooms && !galaxy && !marketOpen && (
           <div className="rounded-lg bg-white/[0.035] p-4">
-            <p className="mb-3 text-sm text-white/60">Join a galaxy to trade or invade other planets.</p>
+            <p className="mb-3 text-sm text-white/60">Join a galaxy to invade or send offers to other planets. The Market is open to everyone.</p>
             <div className="mb-3 grid grid-cols-3 gap-2">
               <button
                 onClick={() => {
@@ -503,7 +516,7 @@ export default function Galaxy({
           </div>
         )}
 
-        {enabled && rooms && galaxy && (
+        {enabled && rooms && (
           <div className="mb-4 grid grid-cols-3 gap-2">
             <button
               onClick={() => setTab("invade")}
@@ -528,9 +541,7 @@ export default function Galaxy({
 
         {enabled && rooms && galaxy && tab === "offers" && <OffersTab planets={shown} sim={sim} spacefaring={spacefaring} offers={offers} />}
 
-        {enabled && rooms && galaxy && marketOpen && (
-          <GalaxyMarket sim={sim} worldId={ids.world} galaxy={galaxy} post={post} sync={sync} onMessage={setMessage} />
-        )}
+        {enabled && marketOpen && <GalaxyMarket sim={sim} worldId={ids.world} galaxy={galaxy} post={post} sync={sync} />}
 
         {/* Before migration 003 there are no rooms: everyone online is listed, so "Play alone" hides them here */}
         {enabled && !rooms && (
@@ -541,7 +552,7 @@ export default function Galaxy({
           </div>
         )}
 
-        {tab === "invade" && (
+        {tab === "invade" && (galaxy || !rooms) && (
           <GalaxyInvasion
             enabled={enabled}
             alone={alone}

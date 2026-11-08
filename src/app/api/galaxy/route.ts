@@ -130,38 +130,41 @@ export async function GET(req: Request) {
     });
   }
 
+  // The market. Since migration 012 there is one shared order book ('GLOBAL') for every player in
+  // every galaxy (or none); before it, each galaxy had its own, so fall back to the player's galaxy.
   if (params.has("market")) {
-    if (!rooms || !galaxy) {
-      return NextResponse.json({ enabled: true, me: me ?? null, orders: [], trades: [] });
-    }
+    const { count: shared } = await supabase.from("market_prices").select("resource", { count: "exact", head: true }).eq("galaxy", "GLOBAL");
+    const book = shared ? "GLOBAL" : rooms ? galaxy : null;
+    if (!book) return NextResponse.json({ enabled: true, global: false, me: me ?? null, orders: [], trades: [], prices: [], history: [] });
     const { data: orders, error: ordersError } = await supabase
       .from("market_orders")
-      .select("id, galaxy, world_id, side, resource, price, quantity, remaining, status, created_at")
-      .eq("galaxy", galaxy)
+      .select("id, world_id, side, resource, price, quantity, remaining, status, created_at")
+      .eq("galaxy", book)
       .in("status", ["open", "partial"])
       .order("price", { ascending: false })
       .order("created_at", { ascending: true })
-      .limit(200);
+      .limit(300);
     if (notMigrated(ordersError)) return NextResponse.json({ error: "Galaxy migration not applied: market tables are missing", enabled: false }, { status: 503 });
     if (ordersError) return NextResponse.json({ error: ordersError.message }, { status: 500 });
-    const { data: trades } = await supabase
-      .from("market_trades")
-      .select("id, resource, price, quantity, buyer_world_id, seller_world_id, created_at")
-      .eq("galaxy", galaxy)
-      .order("created_at", { ascending: false })
-      .limit(30);
-    const { data: prices } = await supabase
-      .from("market_prices")
-      .select("resource, base_price, current_price")
-      .eq("galaxy", galaxy)
-      .order("resource", { ascending: true });
-    const { data: history } = await supabase
-      .from("market_price_history")
-      .select("resource, price, created_at")
-      .eq("galaxy", galaxy)
-      .order("created_at", { ascending: true })
-      .limit(300);
-    return NextResponse.json({ enabled: true, me: me ?? null, orders: orders ?? [], trades: trades ?? [], prices: prices ?? [], history: history ?? [] });
+    const [{ data: trades }, { data: prices }, { data: recent }] = await Promise.all([
+      supabase.from("market_trades").select("id, resource, price, quantity, buyer_world_id, seller_world_id, created_at").eq("galaxy", book).order("created_at", { ascending: false }).limit(30),
+      supabase.from("market_prices").select("resource, base_price, current_price").eq("galaxy", book).order("resource", { ascending: true }),
+      // The newest points (oldest first for the chart); fetching the oldest would freeze a busy chart.
+      supabase.from("market_price_history").select("resource, price, created_at").eq("galaxy", book).order("created_at", { ascending: false }).limit(600),
+    ]);
+    // Which planet each order and trade belongs to, so the book can say who is buying and selling.
+    const ids = [...new Set([...(orders ?? []).map((o) => o.world_id), ...(trades ?? []).flatMap((t) => [t.buyer_world_id, t.seller_world_id])])];
+    const { data: owners } = ids.length ? await supabase.from("planets").select("world_id, planet_name").in("world_id", ids) : { data: [] };
+    const names = Object.fromEntries((owners ?? []).map((o) => [o.world_id, o.planet_name]));
+    return NextResponse.json({
+      enabled: true,
+      global: book === "GLOBAL",
+      me: me ?? null,
+      orders: (orders ?? []).map((o) => ({ ...o, planet_name: names[o.world_id] ?? "A distant world" })),
+      trades: (trades ?? []).map((t) => ({ ...t, buyer_name: names[t.buyer_world_id] ?? "?", seller_name: names[t.seller_world_id] ?? "?" })),
+      prices: prices ?? [],
+      history: (recent ?? []).reverse(),
+    });
   }
 
   let planets: { world_id: string }[] = [];

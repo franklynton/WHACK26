@@ -206,7 +206,8 @@ export function GameRightPanel({
               ["offers", "⇄", "Offers", "Swap with a god"],
             ] as const
           ).map(([view, icon, label, action]) => {
-            const disabled = view === "invade" ? false : !link.galaxy;
+            // Invade opens the join form when you're in no galaxy; the market is shared by everyone.
+            const disabled = view === "offers" ? !link.galaxy : false;
             const className = `group rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-2.5 text-left transition hover:border-white/20 hover:bg-white/[0.09] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-200/50 ${
               disabled ? "cursor-not-allowed opacity-40" : ""
             }`;
@@ -221,14 +222,14 @@ export function GameRightPanel({
                     ? view === "invade"
                       ? "Join a galaxy to invade"
                       : view === "market"
-                        ? "Join a galaxy to use the market"
+                        ? "Buy and sell with every god in every galaxy"
                         : "Join a galaxy to trade with other gods"
                     : view === "invade"
                       ? !spacefaring
                         ? "Reach the Space Age to invade"
                         : "Choose a planet to invade"
                       : view === "market"
-                        ? "Open the galaxy market"
+                        ? "Buy and sell with every god in every galaxy"
                         : "Offer a swap to another god"
                 }
               >
