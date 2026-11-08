@@ -650,6 +650,22 @@ function Cities({ sim }: { sim: PlanetSim }) {
 function ContinentLabels({ sim }: { sim: PlanetSim }) {
   const camera = useThree((s) => s.camera);
   const list = useMemo(() => sim.continents(), [sim]);
+  // Each name lies flat on the land, reading west to east with its top towards the north pole,
+  // like a map. (Without this, every label faced the same way and showed sideways on most of the globe.)
+  const placed = useMemo(
+    () =>
+      list.map((c) => {
+        const position = surface(sim, c.face, new THREE.Vector3()).multiplyScalar(1.02);
+        const normal = position.clone().normalize();
+        const east = new THREE.Vector3(0, 1, 0).cross(normal);
+        if (east.lengthSq() < 1e-6) east.set(1, 0, 0); // at a pole, any direction will do
+        east.normalize();
+        const north = normal.clone().cross(east);
+        const quaternion = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(east, north, normal));
+        return { position, quaternion };
+      }),
+    [list, sim],
+  );
   const refs = useRef<Array<{ material?: { opacity: number; transparent: boolean } } | null>>([]);
   const cam = useMemo(() => new THREE.Vector3(), []);
   useFrame(() => {
@@ -670,7 +686,8 @@ function ContinentLabels({ sim }: { sim: PlanetSim }) {
         <Text
           key={c.name}
           ref={(el) => { refs.current[k] = el; }}
-          position={surface(sim, c.face, new THREE.Vector3()).multiplyScalar(1.02)}
+          position={placed[k].position}
+          quaternion={placed[k].quaternion}
           fontSize={0.045}
           color="#dce8f5"
           anchorX="center"
